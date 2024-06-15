@@ -1,5 +1,4 @@
 use std::usize;
-
 use ark_ff::Zero;
 use bls12_381_plus::{elliptic_curve::hash2curve::ExpandMsgXof, G1Projective, Scalar};
 use digest::{ExtendableOutput, Update, XofReader};
@@ -98,10 +97,9 @@ impl PolynomialG1 {
 
         
     /// Optimized implementation of multi-scalar multiplication adapted from ark-ec library. 
-    /// Does not support multithreading. 
     pub fn msm(&self, x: &Scalar) -> Option<G1Projective> {
         /*
-            TODO: rewrite library using ark-ec and adopt their implementation of msm. 
+            TODO: consider rewriting library using ark-ec and adopting their implementation of msm. 
         */
 
         // If the polynomial is empty we return None
@@ -119,20 +117,18 @@ impl PolynomialG1 {
             return self.evaluate(x);
         }
 
-        
+        // Compute 1,x,...,x^d
         let scalars = self.compute_powers_for_eval(x);
-        let scalars_and_bases_iter = scalars.iter().zip(self.0.clone()).filter(|(&s, _)| ( bool::from(Field::is_zero(&s))));
-        let size = self.0.len();
-
+        
+        // Get an iterator with coefficients and scalars pairs (c_1, 1), (c_2,x), ..., (c_d, x^d) 
+        let scalars_and_coeff_iter = scalars.iter().zip(self.0.clone());
         let c = self.get_window_size();
 
         // Get indexes of msm windows
         let num_bits = Scalar::BYTES*8 as usize;
         let window_starts: Vec<_> = (0..num_bits).step_by(c).collect();
-
         let zero = G1Projective::IDENTITY;
         
-
         // Each window is of size `c`.
         // We divide up the bits 0..num_bits into windows of size `c`, and
         // process each such window.
@@ -141,20 +137,20 @@ impl PolynomialG1 {
                 let mut res = zero;
                 // We don't need the "zero" bucket, so we only have 2^c - 1 buckets.
                 let mut buckets = vec![zero; (1 << c) - 1];
-                // This clone is cheap, because the iterator contains just a
-                // pointer and an index into the original vectors.
-                scalars_and_bases_iter.clone().for_each(|(&scalar, base)| {                    
+                scalars_and_coeff_iter.clone().for_each(|(&scalar, base)| {                    
 
                     let mut scalar = scalar.clone();
-                    // We right-shift by w_start, thus getting rid of the
-                    // lower bits.
+                    // Extract the `c` bits correspondig to our window:
+                    // Right-shift by w_start to remove the lower bits
                     shift_right_assign(&mut scalar, w_start);
-                    // We mod the remaining bits by 2^{window size}, thus taking `c` bits.
+                    // Apply mod 2^{window size} to the result to remove the higher bits
                     apply_modulo2(&mut scalar, c);
+
+                    // The remaining extracted bits form our index in the bucket
                     let index = scalar_to_usize(&scalar);
+                    
                     // If the scalar is non-zero, we update the corresponding
                     // bucket.
-                    // (Recall that `buckets` doesn't have a zero bucket.)
                     if index != 0 {
                         buckets[index - 1] += base;
                     }
@@ -229,7 +225,6 @@ pub fn window_mul(point: G1Projective, coefficients: Vec<Scalar>)-> Vec<G1Projec
         table[i]=table[i-1]+point;
     }
 
-       
     coefficients.iter().map(|&coeff| {        
         // Result of the multiplication            
         let mut res = zero;
@@ -488,7 +483,7 @@ mod tests {
 
     use super::*;
     #[test]
-    fn test_mul(){
+    fn utils_test_mul(){
         let size = 10_000;
         let v = G1Projective::random(rand_core::OsRng{});
         let mut cs = Vec::with_capacity(size);
@@ -498,7 +493,7 @@ mod tests {
         let res = window_mul(v.clone(), cs.clone());
         let t1 = t1.elapsed();
 
-        /*
+        
         let t2 = Instant::now();
         let res2: Vec<G1Projective> = cs.iter().map(|c| c*v).collect();
         let t2 = t2.elapsed();
@@ -507,13 +502,13 @@ mod tests {
             assert_eq!(res[i], res2[i]);
         }
         
-        println!("Compute {size} multiplications without DP: {:?}", t2);*/
+        println!("Compute {size} multiplications without DP: {:?}", t2);
         println!("Compute {size} multiplications with DP: {:?}", t1);
     }
 
 
     #[test]
-    fn test_shift(){
+    fn utils_test_eval(){
         
         let d = 9;
         let mut p = PolynomialG1::with_capacity(d);
