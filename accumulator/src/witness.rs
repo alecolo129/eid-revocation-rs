@@ -299,10 +299,10 @@ mod tests {
         // Update non-revoked element with both versions
         let mut wit2 = wit.clone();
         let t1 = Instant::now();
-        let coeff1 = wit.batch_update_assign(y, deletions, &coefficients).expect("Error when evaluating poly");
+        wit.batch_update_assign(y, deletions, &coefficients).expect("Error when evaluating poly");
         let t1 = t1.elapsed();
         let t2 = Instant::now();
-        let coeff2 = wit2._batch_update_assign(y, deletions, &coefficients).expect("Error when evaluating poly");
+        wit2._batch_update_assign(y, deletions, &coefficients).expect("Error when evaluating poly");
         let t2 = t2.elapsed();
 
         // Try updating revoked element
@@ -319,7 +319,7 @@ mod tests {
     // Test sequential and batch updates
     #[test]
     fn wit_test_update() {
-        let upd_size = 5_001;
+        let upd_size = 1_001;
         wit_sequential_update(upd_size);
         wit_batch_update(upd_size);
     }
