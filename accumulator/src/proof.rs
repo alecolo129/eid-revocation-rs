@@ -293,7 +293,7 @@ mod tests {
     use std::{convert::TryFrom, time::Instant};
 
     use crate::{
-        accumulator::Element, holder::Holder, issuer::Issuer, proof::Proof, witness::Deletion, Accumulator, MembershipWitness, ProofCommitting, ProofParamsPrivate, ProofParamsPublic, PROOF_LABEL, SecretKey, PublicKey
+        accumulator::Element, proof::Proof, witness::Deletion, Accumulator, MembershipWitness, ProofCommitting, ProofParamsPrivate, ProofParamsPublic, PROOF_LABEL, SecretKey, PublicKey
     };
 
     
