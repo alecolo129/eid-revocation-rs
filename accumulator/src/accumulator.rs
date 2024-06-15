@@ -353,8 +353,8 @@ mod tests {
 
         assert_eq!(coeff, coeff2);
 
-        println!("Time to compute {BATCH_DELETIONS} updates: {:?} s", t2);
-        println!("Time to compute {BATCH_DELETIONS} updates with windowed multiplication: {:?} s", t1);
+        println!("Time to compute {BATCH_DELETIONS} updates: {:?}", t2);
+        println!("Time to compute {BATCH_DELETIONS} updates with windowed multiplication: {:?}", t1);
     }
 
    
