@@ -1,14 +1,20 @@
 use accumulator::{
-    accumulator::{Accumulator, Element},
-    key::{PublicKey, SecretKey},
-    proof::ProofParamsPublic,
-    witness::MembershipWitness, PolynomialG1,
+    accumulator::{Accumulator, Element}, dd_compute, key::{PublicKey, SecretKey}, proof::ProofParamsPublic, window_mul, witness::MembershipWitness, Coefficient
 };
 
-use bls12_381_plus::Scalar;
+use bls12_381_plus::{G1Projective, Scalar};
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap};
 
+
+/// Represents a pair or update polynomials (\omega(x), dD(x))
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdatePolynomials {
+    pub deletions: Vec<Element>,
+    pub omegas: Vec<Coefficient>,
+}
+
+/// Represents a pair (C, y) of membership witness, revocation ID 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct RevocationHandle {
     elem: Element,
@@ -16,22 +22,29 @@ pub struct RevocationHandle {
 }
 
 impl RevocationHandle {
+
+    /// Creates a new RevocationHandle an accumulator value and the corrisponding secret key
     fn new(accumulator: Accumulator, secret_key: &SecretKey) -> Self {
+        // Pick a random y
         let elem = Element::random();
+        // Create a witness for y
         let wit = MembershipWitness::new(&elem, accumulator, secret_key);
         Self { elem, wit }
     }
 
+    /// Returns the associated witness C
     pub fn get_witness(&self) -> MembershipWitness {
         return self.wit;
     }
 
+    /// Returns the associated element y
     pub fn get_elem(&self) -> Element {
         return self.elem;
     }
 
-    fn update_witness(&mut self, coeff: &Scalar) {
-        self.wit.fast_update_assign(coeff);
+    /// Updates the witness with the input point
+    fn update_witness(&mut self, new_wit: G1Projective) {
+        self.wit.apply_update(new_wit);
     }
 }
 
@@ -41,9 +54,7 @@ pub struct Issuer {
     acc_pk: PublicKey,
     acc: Accumulator,
     witnesses: HashMap<String, RevocationHandle>,
-    update_coeff: Scalar,
-    update_list: Vec<Element>,
-    omega: PolynomialG1
+    deletions: Vec<Element>,
 }
 
 impl Issuer {
@@ -58,9 +69,7 @@ impl Issuer {
             acc_pk,
             acc,
             witnesses: HashMap::new(),
-            update_coeff: Scalar::ONE,
-            update_list: Vec::new(),
-            omega: PolynomialG1::with_capacity(1)
+            deletions: Vec::new(),
         }
     }
 
@@ -68,7 +77,8 @@ impl Issuer {
     /// 
     /// If the value is not present, prouces a new instance of `Revocation Handle`.
     /// Otherwise, does nothing and returns `None`
-    pub fn add(&mut self, pseudo: String) -> Option<RevocationHandle> {
+    pub fn add<T: Into<String>>(&mut self, pseudo: T) -> Option<RevocationHandle> {
+        let pseudo: String = pseudo.into();
         match self.witnesses.entry(pseudo.clone()) {
             Entry::Occupied(_) => return None,
             Entry::Vacant(v) => {
@@ -78,42 +88,85 @@ impl Issuer {
         }
     }
 
-    ///Deletes a witness from the list of witnesses
-    ///
-    ///If the value is present, updates the list and returns the old `MembershipWitness`.
-    ///Otherwise, does nothing and returns `None`
-    fn remove(&mut self, value: &String) -> Option<RevocationHandle> {
-        return self.witnesses.remove(value);
-    }
 
-    ///Removes a witness from the accumulator
+    ///Removes the element associated with the psedonym `pseudo` from the list of witnesses, and adds it to the deletion list.
+    ///Note that the accumulator value is NOT modified by this operation.
     ///    
-    ///If the value is present, updates the accumulator and returns the old `Revocation Handle`.
+    ///If the value is present, returns the old `RevocationHandle`.
     ///Otherwise, does nothing and returns `None`
-    pub fn delete(&mut self, pseudo: &String) -> Option<RevocationHandle> {
+    pub fn remove(&mut self, pseudo: &String) -> Option<RevocationHandle> {
         let rh = self.witnesses.remove(pseudo)?;
-        self.update_coeff *= self.acc_sk.batch_deletions(&[rh.get_elem()]).0;
+        self.deletions.push(rh.get_elem());       
         return Some(rh);
     }
 
-    pub fn delete_elements(&mut self, values: &[String]) {
-        let mut existing_elements: Vec<Element> = Vec::new();
-        values.iter().for_each(|pseudo| {
-            if let Some(rh) = self.remove(&pseudo) {
+    ///Removes the elements associated with the psedonyms `pseudos` from the list of witnesses, and adds them to the deletion list.
+    ///Note that the accumulator value is NOT modified by this operation.
+    ///    
+    ///Does nothing for all the pseudonyms that are not associated to any accumulated element.
+    pub fn remove_elements(&mut self, pseudos: &[String]) {
+        let mut existing_elements: Vec<Element> = Vec::with_capacity(pseudos.len());
+        pseudos.iter().for_each(|pseudo| {
+            if let Some(rh) = self.witnesses.remove(pseudo) {
                 existing_elements.push(rh.elem);
             }
         });
-        self.update_coeff *= self.acc_sk.batch_deletions(existing_elements.as_slice()).0;
+        self.deletions.append(&mut existing_elements);
     }
 
-    /// Update all witnesses in witness list.
-    pub fn update(&mut self) {
-        // TODO: do this more efficiently with windowed mult
-        self.acc.0 *= self.update_coeff;
+    ///Performs a batch deletion of all the elements stored in the `deletions` list. 
+    ///Note that this operation modifies the accumulator value and empties the list of deletions.
+    ///    
+    ///If the `deletions` list is not empty, returns the update polynomials.
+    ///Otherwise does nothing and returns `None`.
+    pub fn update(&mut self) -> Option<UpdatePolynomials>{ 
+        // If no deletions return `None`
+        if self.deletions.is_empty() {
+            return None
+        }
+        //Compute update polys
+        let omegas = self.acc.update_assign(&self.acc_sk, self.deletions.as_slice());
+        let polys = UpdatePolynomials{deletions: self.deletions.clone(), omegas};
+        //Clear list of deletions
+        self.deletions.clear();
+        return Some(polys)
+    }
+
+    ///Performs a periodic update. Revokes any element left in the list of deletions and update all witnesses
+    pub fn update_periodic(&mut self){
+        
+        // Revoke any elements to be revoked
+        if !self.deletions.is_empty(){
+            self.acc.remove_elements_assign(&self.acc_sk, self.deletions.as_slice());
+            self.deletions.clear();
+        }
+
+        // Compute coefficients for the update (i.e., [(\alpha + y_1)^-1, ..., (\alpha + y_m)^-1])
+        let coefficients: Vec<Scalar> = self.witnesses
+            .iter()
+            .map(|(_, rh)| 
+                self.acc_sk.batch_deletions(&[rh.get_elem()]).0
+            )
+            .collect();
+
+        // Efficiently update all witnesses
+        let new_wits = window_mul(self.acc.0, coefficients);
         self.witnesses
             .iter_mut()
-            .for_each(|(_, rh)| rh.update_witness(&self.update_coeff));
-        self.update_coeff = Scalar::ONE;
+            .enumerate()
+            .for_each(|(i, (_, rh))| rh.update_witness(new_wits[i]));
+    }
+
+    ///Deletes the element associated with `pseudo` from the accumulator and the list of witnesses.
+    ///Note that this operation modifies the accumulator value.
+    ///    
+    ///If present, returns the update polynomials for the deleted element. 
+    ///Otherwise, does nothing and returns `None`
+    pub fn delete(&mut self, pseudo: &String) -> Option<UpdatePolynomials> {
+        let rh = self.witnesses.remove(pseudo)?;  
+        let deletions = vec![rh.elem];
+        let omegas = self.acc.update_assign(&self.acc_sk, deletions.as_slice());
+        return Some(UpdatePolynomials{deletions, omegas});
     }
 
     pub fn get_proof_params(&self) -> ProofParamsPublic {
@@ -140,47 +193,46 @@ impl Issuer {
 }
 
 
-/*
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::holder::Holder;
     use crate::verifier::Verifier;
-    use crate::{generate_fr, SALT};
-    use std::time::SystemTime;
+    use accumulator::{generate_fr, witness, SALT};
+    use core::num;
+    use std::time::{Instant, SystemTime};
     const ADD_SIZE: usize = 1000;
     //const _SIZE: usize = 10;
     #[test]
     fn setup() {
-        let time = SystemTime::now();
-        let iss = Issuer::new(Some(b"setup_acc"));
+        let time = Instant::now();
+        let iss = Issuer::new(None);
         iss.get_proof_params();
         println!(
             "Setup time: {:?}",
-            SystemTime::now().duration_since(time).unwrap()
+            time.elapsed()
         )
     }
 
     #[test]
     fn issue() {
         //Issuer
-        let mut iss = Issuer::new(Some(b"setup_acc"));
+        let mut iss = Issuer::new(None);
         let pp = iss.get_proof_params();
-        let w = iss.add(b"test");
-        assert!(w.is_some());
+        let rh = iss.add("test");
+        let rh = rh.expect("Cannot issue witness");
 
         //Holder
-        let holder = Holder::new(Element::hash(b"test"), Some(pp), w);
-        let time = SystemTime::now();
+        let holder = Holder::new(String::from("Holder"), rh, Some(pp));
+        let t = Instant::now();
         let proof_params = iss.get_proof_params();
         let proof = holder.proof_membership(&proof_params);
         println!(
             "Time to create membership proof: {:?}",
-            SystemTime::now().duration_since(time).unwrap()
+            t.elapsed()
         );
-        assert!(proof.is_some());
-        let proof = proof.unwrap();
-
+  
         //Verifier
         let ver_params = iss.get_proof_params();
         let ver = Verifier::new(&ver_params);
@@ -193,123 +245,133 @@ mod tests {
     }
 
     #[test]
-    fn add() {
-        let issuer = Issuer::new(Some(b"setup_acc"));
-        let mut elements: Vec<Element> = Vec::new();
-        (0..ADD_SIZE).for_each(|_| elements.push(Element::random()));
+    fn issuer_single_update() {
+        // Setup issuer
+        let mut issuer = Issuer::new(None);
+        
+        // Compute witnesses for ADD_SIZE elements
+        let mut elements = Vec::new();
+        let mut witness = Vec::new();
+        (0..ADD_SIZE).for_each(|i| {
+            let rh = issuer.add(i.to_string()).expect("Cannot add witness");
+            witness.push(rh.get_witness());
+            elements.push(rh.get_elem());
+        });
 
-        let time = SystemTime::now();
-        //issuer.add_all(&elements);
+        // Delete one of the elements and compute update
+        let t = Instant::now();
+        let polys = issuer.delete(&0.to_string()).expect("Non existing element");
         println!(
-            "Time to create and add {ADD_SIZE} witness: {:?}",
-            SystemTime::now().duration_since(time).unwrap()
+            "Time to remove one element and compute update polynomials: {:?}",
+            t.elapsed()
         );
-        issuer
-            .witnesses
-            .iter()
-            .for_each(|(el, w)| assert!(w.verify(*el, issuer.acc_pk, issuer.acc)))
+
+        // Check non-revoked witness is invalid before updating and is valid after updating
+        let valid_y = elements[1];
+        let mut valid_wit = witness[1];
+        assert!(!valid_wit.verify(valid_y, issuer.get_pk(), issuer.get_accumulator()));
+        valid_wit.batch_update_assign(valid_y, polys.deletions.as_slice(), polys.omegas.as_slice());
+        assert!(valid_wit.verify(valid_y, issuer.get_pk(), issuer.get_accumulator()));
+
+        // Check revoked witness is always invalid
+        let revoked_y = elements[0];
+        let mut revoked_wit = witness[0];
+        assert!(!revoked_wit.verify(revoked_y, issuer.get_pk(), issuer.get_accumulator()));
+        revoked_wit.batch_update_assign(elements[0], polys.deletions.as_slice(), polys.omegas.as_slice());
+        assert!(!revoked_wit.verify(revoked_y, issuer.get_pk(), issuer.get_accumulator()));
+        assert!(issuer.deletions.is_empty())
+    }
+
+    
+    
+    #[test]
+    fn issuer_batch_update() {
+        // Setup issuer
+        let mut issuer = Issuer::new(None);
+        
+        // Compute witnesses for ADD_SIZE elements
+        let mut elements = Vec::new();
+        let mut witness = Vec::new();
+        (0..ADD_SIZE).for_each(|i| {
+            let rh = issuer.add(i.to_string()).expect("Cannot add witness");
+            witness.push(rh.get_witness());
+            elements.push(rh.get_elem());
+        });
+
+        // Revoke ADD_SIZE/2 elements and compute update polys
+        let num_deletions = ADD_SIZE / 2;
+        let t = Instant::now();
+        let deletions: Vec<String> = (0..num_deletions).map(|i| i.to_string()).collect();
+        issuer.remove_elements(deletions.as_slice());
+        let polys = issuer.update();
+        println!(
+            "Time to revoke {num_deletions} witness and compute update polynomials: {:?}",
+            t.elapsed()
+        );
+        let polys = polys.expect("Deletion list is empty");
+
+        // Check non-revoked witness is invalid before updating and is valid after updating
+        let valid_y = elements[num_deletions];
+        let mut valid_wit = witness[num_deletions];
+        assert!(!valid_wit.verify(valid_y, issuer.get_pk(), issuer.get_accumulator()));
+        valid_wit.batch_update_assign(valid_y, polys.deletions.as_slice(), polys.omegas.as_slice());
+        assert!(valid_wit.verify(valid_y, issuer.get_pk(), issuer.get_accumulator()));
+
+        // Check revoked witness is always invalid
+        let revoked_y = elements[0];
+        let mut revoked_wit = witness[0];
+        assert!(!revoked_wit.verify(revoked_y, issuer.get_pk(), issuer.get_accumulator()));
+        revoked_wit.batch_update_assign(elements[0], polys.deletions.as_slice(), polys.omegas.as_slice());
+        assert!(!revoked_wit.verify(revoked_y, issuer.get_pk(), issuer.get_accumulator()));
+        assert!(issuer.deletions.is_empty())
     }
 
     #[test]
-    fn periodic_update() {
-        let mut issuer = Issuer::new(Some(b"test"));
-
-        let time = SystemTime::now();
-        let mut elements: Vec<Element> = Vec::new();
+    fn issuer_epoch_update() {
+        // Setup issuer
+        let mut issuer = Issuer::new(None);
+        
+        // Compute witnesses for ADD_SIZE elements
+        let mut elements = Vec::new();
+        let mut witness = Vec::new();
         (0..ADD_SIZE).for_each(|i| {
-            elements.push(Element::hash(i.to_string().as_bytes()));
+            let rh = issuer.add(i.to_string()).expect("Cannot add witness");
+            witness.push(rh.get_witness());
+            elements.push(rh.get_elem());
         });
+
+        // Simulate we have ADD_SIZE/2 elements to delete
+        let num_deletions = ADD_SIZE / 2;
+        let deletions: Vec<String> = (0..num_deletions).map(|i| i.to_string()).collect();
+        issuer.remove_elements(deletions.as_slice());
+
+        // Revoke removed elements and update all witnessses for valid elements
+        let t = Instant::now();
+        issuer.update_periodic();
         println!(
-            "Time to init vector: {:?}",
-            SystemTime::now().duration_since(time).unwrap()
+            "Time to compute periodic update of {} witness: {:?}",
+            ADD_SIZE-num_deletions,
+            t.elapsed()
         );
 
-        let time = SystemTime::now();
-        elements.iter().enumerate().for_each(|(i, el)| {
-            issuer.add(i.to_string().as_bytes());
+        let new_wits = issuer.get_witnesses();
+
+        // Check all witnesses in previous witnesss list are invalid
+        (0..ADD_SIZE).for_each(|i|{
+            assert!(!witness[i].verify(elements[i], issuer.get_pk(), issuer.get_accumulator()));
         });
-        println!(
-            "Time to add {} witness: {:?}",
-            ADD_SIZE,
-            SystemTime::now().duration_since(time).unwrap()
-        );
 
-        let deletions = &elements[..ADD_SIZE / 2];
-        let time = SystemTime::now();
-
-        deletions.into_iter().for_each(|el| {
-            issuer.delete(&el);
+        // Check non-revoked witness are updated
+        (num_deletions..ADD_SIZE).for_each(|i|{
+            let wit = new_wits.get(&i.to_string());
+            let wit = wit.expect("Non-revoked element is not present in witness list!");
+            assert!(wit.verify(elements[i], issuer.get_pk(), issuer.get_accumulator()))
         });
-        println!(
-            "Time to remove {ADD_SIZE} witness: {:?}",
-            SystemTime::now().duration_since(time).unwrap()
-        );
 
-        let time = SystemTime::now();
-        issuer.update();
-        println!(
-            "Time to update remaining {} witnesses: {:?}",
-            ADD_SIZE - ADD_SIZE / 2,
-            SystemTime::now().duration_since(time).unwrap()
-        );
-
-        println!("Size witnesses: {:?}", issuer.witnesses.len());
+        // Check revoked witness are not updated
+        (0..num_deletions).for_each(|i|{
+            let wit = new_wits.get(&i.to_string());
+            assert!(wit.is_none());
+        });
     }
-}*/
-
-/*
-mod performance_tests{
-    use super::*;
-    use std::{time::SystemTime, usize};
-
-
-    fn _update(size: usize){
-        let issuer = Issuer::new(Some(b"test"), Some(b"testone"));
-        let mut witnesses: Vec<MembershipWitness> = Vec::new();
-        (0..=size).for_each(|_| witnesses.push(MembershipWitness::random()));
-
-
-        let time = SystemTime::now();
-        issuer._update_all(&mut witnesses);
-        println!(
-            "Time to update {} witnesses: {:?}",
-            size,
-            SystemTime::now().duration_since(time).unwrap()
-        );
-    }
-
-    #[test] #[allow(non_snake_case)]
-    fn update_1(){
-        _update(1);
-    }
-
-    #[test] #[allow(non_snake_case)]
-    fn update_10(){
-        _update(10);
-    }
-
-    #[test] #[allow(non_snake_case)]
-    fn update_100(){
-        _update(10);
-    }
-
-    #[test] #[allow(non_snake_case)]
-    fn update_1K(){
-        _update(1_000);
-    }
-
-    #[test] #[allow(non_snake_case)]
-    fn update_10K(){
-        _update(10_000);
-    }
-
-    #[test] #[allow(non_snake_case)]
-    fn update_100K(){
-        _update(100_000);
-    }
-
-    #[test] #[allow(non_snake_case)]
-    fn update_1M(){
-        _update(1_000_000);
-    }
-}*/
+}
