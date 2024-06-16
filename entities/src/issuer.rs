@@ -1,5 +1,5 @@
 use accumulator::{
-    accumulator::{Accumulator, Element}, dd_compute, key::{PublicKey, SecretKey}, proof::ProofParamsPublic, window_mul, witness::MembershipWitness, Coefficient
+    accumulator::{Accumulator, Element}, key::{PublicKey, SecretKey}, proof::ProofParamsPublic, window_mul, witness::MembershipWitness, Coefficient
 };
 
 use bls12_381_plus::{G1Projective, Scalar};
