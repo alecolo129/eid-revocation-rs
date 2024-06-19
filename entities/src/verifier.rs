@@ -56,13 +56,13 @@ mod tests {
         // Init Holder
         let rh = issuer.add("holder1").unwrap();
         let params = issuer.get_proof_params();
-        let holder = Holder::new("holder1", rh, Some(params));
+        let holder = Holder::new("holder1", rh, params);
         
         // Init Verifier
         let ver = Verifier::new(params);
         
         // Compute proof
-        let proof = holder.proof_membership(&params);
+        let proof = holder.proof_membership(None);
         
         // Verify proof
         let t = Instant::now();
@@ -81,7 +81,7 @@ mod tests {
         // Init Holder
         let rh = issuer.add("holder1").unwrap();
         let params = issuer.get_proof_params();
-        let holder = Holder::new("holder1", rh, Some(params));
+        let holder = Holder::new("holder1", rh, params);
         
         // Init Verifier
         let mut ver = Verifier::new(params);
@@ -95,7 +95,7 @@ mod tests {
         ver.update_acc(new_acc);
 
         // Compute proof
-        let proof = holder.proof_membership(&params);
+        let proof = holder.proof_membership(None);
         
         // Verify proof is not valid
         let t = Instant::now();
