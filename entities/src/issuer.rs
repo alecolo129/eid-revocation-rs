@@ -224,10 +224,10 @@ mod tests {
         let rh = rh.expect("Cannot issue witness");
 
         //Holder
-        let holder = Holder::new(String::from("Holder"), rh, Some(pp));
+        let holder = Holder::new(String::from("Holder"), rh, pp.clone());
         let t = Instant::now();
         let proof_params = iss.get_proof_params();
-        let proof = holder.proof_membership(&proof_params);
+        let proof = holder.proof_membership(None);
         println!(
             "Time to create membership proof: {:?}",
             t.elapsed()
@@ -235,7 +235,7 @@ mod tests {
   
         //Verifier
         let ver_params = iss.get_proof_params();
-        let ver = Verifier::new(&ver_params);
+        let ver = Verifier::new(ver_params);
         let time = SystemTime::now();
         assert!(ver.verify(proof));
         println!(
