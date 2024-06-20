@@ -10,7 +10,6 @@ mod controller;
 
 #[tokio::main]
 async fn main() {
-    println!("Aaaa");
     
     //Initialise Servers
     let reg = thread::spawn(|| self::base_registry::run());
@@ -23,16 +22,16 @@ async fn main() {
     //Initialise holders
     let rh1 = Client::ask_issuance("test1".to_string()).await.unwrap();
     let rh2 = Client::ask_issuance("test2".to_string()).await.unwrap();
-    let mut cl1 = Holder::new("test1".to_string(), rh1, Some(pp));
-    let mut cl2 = Holder::new("test2".to_string(), rh2, Some(pp));
+    let mut cl1 = Holder::new("test1".to_string(), rh1, pp);
+    let mut cl2 = Holder::new("test2".to_string(), rh2, pp);
 
     
     //Initialise Verifier
-    let mut ver = Verifier::new(&pp);
+    let mut ver = Verifier::new(pp);
 
     //Verify both proofs
-    assert!(ver.verify(cl1.proof_membership(&pp)));
-    assert!(ver.verify(cl2.proof_membership(&pp)));
+    assert!(ver.verify(cl1.proof_membership(None)));
+    assert!(ver.verify(cl2.proof_membership(None)));
 
     //Revoke first client
     assert!(Controller::revoke("test1").await.unwrap().status().is_success());
@@ -42,11 +41,11 @@ async fn main() {
 
     //Check revocation status of first client
     pp = Client::ask_pp().await.unwrap();
-    assert!(!cl1.test_membership(Some(pp)).unwrap());
+    assert!(!cl1.test_membership(Some(pp)));
 
     //Update second client
     assert!(Client::ask_update(&mut cl2).await.expect("Communication error"));
-    assert!(cl2.test_membership(Some(pp)).unwrap());
+    assert!(cl2.test_membership(Some(pp)));
     
     //Check first client doesn't receive update
     assert!(!Client::ask_update(&mut cl1).await.expect("Communication error"));
