@@ -88,7 +88,7 @@ mod tests {
 
 
         // Delete holder
-        issuer.delete(&String::from("holder1"));
+        issuer.revoke_instant(&String::from("holder1"));
 
         // Update verifier
         let new_acc = issuer.get_accumulator();
