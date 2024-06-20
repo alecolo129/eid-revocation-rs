@@ -3,18 +3,6 @@
 This package contains an implementation of a pairing-based accumulator, based on the work of [Ngu05](https://link.springer.com/chapter/10.1007/978-3-540-30574-3_19).
 
 
-## Features
-This package is built on top of the ALLOSAUR [implementation](https://github.com/sam-jaques/allosaurust) of Sam Jaques with some substantial changes, notably:
-
-- removed support for non-membership witnesses (update was broken in [this paper](https://link.springer.com/chapter/10.1007/978-3-030-75539-3_12)) and perform updates only on deletions as in [KB21](https://ieeexplore.ieee.org/abstract/document/9505229) (Section IV);
-
-- Optimized creation and evaluation of update polynomials (see `utils::msm` and `key::create_coefficients`);
-
-- Efficient membership proof without pairings on the holder side as in [TZ23](https://link.springer.com/chapter/10.1007/978-3-031-30589-4_24) (see `proof.rs`);
-
-
-- Support for fast keyed update of many witnesses using window multiplication (see `accumulator::update_assign`);
-
 ## Content
 This package contains the following files:
 
@@ -28,6 +16,8 @@ This package contains the following files:
 
 - `utils.rs`: provides some useful functions for polynomials and random scalar generation.
 
+
+
 ## Testing
 
 An example usage of the primitives provided in this library can be found in the `tests` module at the end of each file. 
@@ -40,6 +30,5 @@ For the optimized release mode execute:
 
 `cargo test [file_name/test_name] --release -- --nocapture`
 
-and the results will be output to the terminal. File names 
-*should not* include the `.rs` extension.
+and the results will be output to the terminal. File names *should not* include the `.rs` extension.
 

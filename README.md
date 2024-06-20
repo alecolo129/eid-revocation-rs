@@ -9,8 +9,11 @@ This repository contains the following packages:
 
 - `entities`: implements the main roles defined in the [Swiss Trust Infrastructure](https://github.com/e-id-admin/open-source-community/blob/main/discussion-paper-tech-proposal/discussion-paper-tech-proposal.md) (i.e., *Issuer*, *Holder*, and *Verifier*) making use of the cryptographic functions implemented in the `accumulator` package; 
 
-- `networking`: provides basic server implementations for the *Base Registry* and the *Issuer*. It also contains wrappers around *Holder* and *Verifier* for conveniently querying the servers. **NOTE:** *this package is still a work-in-progress, at the moment it only supports periodic update of the holder witnessses and necessitate further testing.*
+- `networking`: provides basic server implementations for the *Base Registry* and the *Issuer*. It also contains wrappers around *Holder* and *Verifier* for conveniently querying the servers. **NOTE:** *this package is still a work-in-progress, at the moment it doesn't support updating with update polynomials and necessitate further testing.*
 
+
+## Benches
+Benches are currently manually crafted and not automated; the `benches` folder will be updated soon to make it more usable. 
 
 ## Credits
 The accumulator package is built on top of the ALLOSAUR [implementation](https://github.com/sam-jaques/allosaurust) of Sam Jaques. 
