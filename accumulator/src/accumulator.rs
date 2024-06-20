@@ -4,16 +4,14 @@ use super::{
 };
 use crate::window_mul;
 use bls12_381_plus::{G1Affine, G1Projective, Scalar};
-use digest::{ExtendableOutput, Update};
 use core::{
     convert::TryFrom,
-    fmt::{self, Formatter}, hash,
+    fmt::{self, Formatter},
 };
 use group::GroupEncoding;
 use rand_core::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
-use sha3::Shake256;
 
 /// An element in the accumulator
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
