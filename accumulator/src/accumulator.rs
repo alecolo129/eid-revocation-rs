@@ -4,14 +4,16 @@ use super::{
 };
 use crate::window_mul;
 use bls12_381_plus::{G1Affine, G1Projective, Scalar};
+use digest::{ExtendableOutput, Update};
 use core::{
     convert::TryFrom,
-    fmt::{self, Formatter},
+    fmt::{self, Formatter}, hash,
 };
 use group::GroupEncoding;
 use rand_core::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
+use sha3::Shake256;
 
 /// An element in the accumulator
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -195,7 +197,7 @@ impl Accumulator {
 
     /// Using the trapdoor `key`, returns a new accumulator without the values in `deletions`. 
     /// Does not compute the update coefficients.
-    pub fn remove_elements(&self, key: &SecretKey, deletions: &[Element]) -> Self {
+    pub fn remove_elements(&self, key: &SecretKey, deletions: &[Element]) -> Accumulator {
         let mut a = self.clone();
         a.remove_elements_assign(key, deletions);
         a
@@ -203,9 +205,10 @@ impl Accumulator {
 
     /// Using the trapdoor `key`, removes values in `deletions` 
     /// and updates the accumulator, without computing update coefficients.
-    pub fn remove_elements_assign(&mut self, key: &SecretKey, deletions: &[Element]) {
+    pub fn remove_elements_assign(&mut self, key: &SecretKey, deletions: &[Element]) -> Accumulator{
         // V' = V*((𝛼+y_1)*...*(𝛼+y_n))^-1
         self.0 *= key.batch_deletions(deletions).0;
+        *self
     }
 
     /// Given the accumulator trapdoor `key` and a list of deletions `deletions`, 
@@ -254,7 +257,12 @@ impl Accumulator {
         self.0 *= d.0;
         coefficients
     }
-        
+
+    /// Generate accumulator id
+    pub fn get_id(&self) -> Scalar{
+        return generate_fr(SALT, Some(&self.to_bytes()), rand_core::OsRng{})
+    }
+
     /// Convert accumulator to bytes
     pub fn to_bytes(&self) -> [u8; Self::BYTES] {
         let mut d = [0u8; Self::BYTES];
