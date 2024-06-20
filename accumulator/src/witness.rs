@@ -56,29 +56,6 @@ impl MembershipWitness {
         Self(accumulator.remove(secret_key, *value).0)
     }
 
-    /// Verify this is a valid witness for element `y`, public key `pubkey`, and accumulator value `accumulator`.
-    pub fn verify(&self, y: Element, pubkey: PublicKey, accumulator: Accumulator) -> bool {
-        let mut p = G2Projective::GENERATOR;
-        p *= y.0;
-        p += pubkey.0;
-        let g2 = G2Projective::GENERATOR;
-        
-        // Notation as per section 2 in <https://eprint.iacr.org/2020/777>
-        // e(C, yP~ + Q~) == e(V, P~) <=>  e(C, yP~ + Q~) - e(V, P~) == 0_{G_t}
-        bool::from(
-            multi_miller_loop(&[
-                // e(C, yP~ + Q~)
-                (&self.0.to_affine(), &G2Prepared::from(p.to_affine())),
-                // -e(V, P~)
-                (
-                    &accumulator.0.to_affine(),
-                    &G2Prepared::from(-g2.to_affine()),
-                ),
-            ])
-            .final_exponentiation()
-            .is_identity(),
-        )
-    }
 
     /// Membership witness update as defined in section 3 of <https://eprint.iacr.org/2022/1362>.
     /// Return a new witness
@@ -104,14 +81,10 @@ impl MembershipWitness {
         }
     }
 
-    /// Perform in-place update of the witness in constant time, using the update coefficient
-    pub fn fast_update_assign(&mut self, coeff: &Scalar) {
-        // TODO: Remove this function
-        // coeff = 1/((y_1+𝛼)*(y_2+𝛼)*...*(y_d+𝛼))
-        // V' = coeff * V => C' = coeff * C
-        self.0 *= coeff;
-    }
-
+    /// Perform batch update using the associated element `y`, the list of coefficients `omega`, 
+    /// and list of deleted elements `deletions`.
+    /// 
+    /// Returns a new updated instance of `MembershipWitness`.
     pub fn batch_update(
         &self,
         y: Element,
@@ -157,8 +130,44 @@ impl MembershipWitness {
             self.0 *= d_d;
             Ok(*self)
         } else {
-            Err(Error::from_msg(2, "polynomial could not be evaluated"))
+            Err(Error::from_msg(2, "polynomial could not be evaluated"))        
         }
+    }
+
+    /// Substitutes the underlying G1 point with the `new_wit` given as input.
+    pub fn apply_update(&mut self, new_wit: G1Projective) {
+        self.0 = new_wit;
+    }
+
+    /// Verify this is a valid witness for element `y`, public key `pubkey`, and accumulator value `accumulator`.
+    pub fn verify(&self, y: Element, pubkey: PublicKey, accumulator: Accumulator) -> bool {
+        let mut p = G2Projective::GENERATOR;
+        p *= y.0;
+        p += pubkey.0;
+        let g2 = G2Projective::GENERATOR;
+        
+        // Notation as per section 2 in <https://eprint.iacr.org/2020/777>
+        // e(C, yP~ + Q~) == e(V, P~) <=>  e(C, yP~ + Q~) - e(V, P~) == 0_{G_t}
+        bool::from(
+            multi_miller_loop(&[
+                // e(C, yP~ + Q~)
+                (&self.0.to_affine(), &G2Prepared::from(p.to_affine())),
+                // -e(V, P~)
+                (
+                    &accumulator.0.to_affine(),
+                    &G2Prepared::from(-g2.to_affine()),
+                ),
+            ])
+            .final_exponentiation()
+            .is_identity(),
+        )
+    }
+
+    /// Return the byte sequence for this witness.
+    pub fn to_bytes(&self) -> [u8; Self::BYTES] {
+        let mut res = [0u8; Self::BYTES];
+        res.copy_from_slice(self.0.to_bytes().as_ref());
+        res
     }
 
     /// Old unoptimized version, just for testing
@@ -193,22 +202,10 @@ impl MembershipWitness {
             self.0 *= d_d;
             Ok(*self)
         } else {
-            Err(Error::from_msg(2, "polynomial could not be evaluated"))
+            Err(Error::from_msg(2, "polynomial could not be evaluated")) 
         }
     }
 
-
-    /// Substitutes the underlying G1 point with the `new_wit` given as input.
-    pub fn apply_update(&mut self, new_wit: G1Projective) {
-        self.0 = new_wit;
-    }
-
-    /// Return the byte sequence for this witness.
-    pub fn to_bytes(&self) -> [u8; Self::BYTES] {
-        let mut res = [0u8; Self::BYTES];
-        res.copy_from_slice(self.0.to_bytes().as_ref());
-        res
-    }
 }
 
 /// Evaluates poly dD(y) = ∏ 1..m (yD_i - y)
