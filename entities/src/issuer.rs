@@ -94,17 +94,29 @@ impl Issuer {
     ///    
     ///If the value is present, returns the old `RevocationHandle`.
     ///Otherwise, does nothing and returns `None`
-    pub fn remove(&mut self, pseudo: &String) -> Option<RevocationHandle> {
+    pub fn revoke(&mut self, pseudo: &String) -> Option<RevocationHandle> {
         let rh = self.witnesses.remove(pseudo)?;
         self.deletions.push(rh.get_elem());       
         return Some(rh);
+    }
+
+    ///Deletes the element associated with `pseudo` from the accumulator and the list of witnesses.
+    ///Note that this operation MODIFIES the accumulator value.
+    ///    
+    ///If present, returns the update polynomials for the deleted element. 
+    ///Otherwise, does nothing and returns `None`
+    pub fn revoke_instant(&mut self, pseudo: &String) -> Option<UpdatePolynomials> {
+        let rh = self.witnesses.remove(pseudo)?;  
+        let deletions = vec![rh.elem];
+        let omegas = self.acc.update_assign(&self.acc_sk, deletions.as_slice());
+        return Some(UpdatePolynomials{deletions, omegas});
     }
 
     ///Removes the elements associated with the psedonyms `pseudos` from the list of witnesses, and adds them to the deletion list.
     ///Note that the accumulator value is NOT modified by this operation.
     ///    
     ///Does nothing for all the pseudonyms that are not associated to any accumulated element.
-    pub fn remove_elements(&mut self, pseudos: &[String]) {
+    pub fn revoke_elements(&mut self, pseudos: &[String]) {
         let mut existing_elements: Vec<Element> = Vec::with_capacity(pseudos.len());
         pseudos.iter().for_each(|pseudo| {
             if let Some(rh) = self.witnesses.remove(pseudo) {
@@ -114,6 +126,31 @@ impl Issuer {
         self.deletions.append(&mut existing_elements);
     }
 
+    ///Deletes the elements associated with the psedonyms `pseudos` from the accumulator and the list of witnesses.
+    ///Note that this operation MODIFIES the accumulator value.
+    ///    
+    ///If some elements are present, returns the update polynomials for the deleted elements. 
+    ///Otherwise, does nothing and returns `None`
+    pub fn revoke_elements_instant(&mut self, pseudos: &[String]) -> Option<UpdatePolynomials>{
+        let mut deletions: Vec<Element> = Vec::with_capacity(pseudos.len());
+        
+        // Fill list of deletions with all the elements associated to existing pseudonyms
+        pseudos.iter().for_each(|pseudo| {
+            if let Some(rh) = self.witnesses.remove(pseudo) {
+                deletions.push(rh.elem);
+            }
+        });
+
+        // Return None if no element was deleted
+        if deletions.is_empty(){
+            return None;
+        }
+
+        // Update accumulator and compute update poly
+        let omegas = self.acc.update_assign(&self.acc_sk, deletions.as_slice());
+        Some(UpdatePolynomials{deletions, omegas})
+    }
+    
     ///Performs a batch deletion of all the elements stored in the `deletions` list. 
     ///Note that this operation modifies the accumulator value and empties the list of deletions.
     ///    
@@ -155,18 +192,6 @@ impl Issuer {
             .iter_mut()
             .enumerate()
             .for_each(|(i, (_, rh))| rh.update_witness(new_wits[i]));
-    }
-
-    ///Deletes the element associated with `pseudo` from the accumulator and the list of witnesses.
-    ///Note that this operation modifies the accumulator value.
-    ///    
-    ///If present, returns the update polynomials for the deleted element. 
-    ///Otherwise, does nothing and returns `None`
-    pub fn delete(&mut self, pseudo: &String) -> Option<UpdatePolynomials> {
-        let rh = self.witnesses.remove(pseudo)?;  
-        let deletions = vec![rh.elem];
-        let omegas = self.acc.update_assign(&self.acc_sk, deletions.as_slice());
-        return Some(UpdatePolynomials{deletions, omegas});
     }
 
     pub fn get_proof_params(&self) -> ProofParamsPublic {
@@ -260,7 +285,7 @@ mod tests {
 
         // Delete one of the elements and compute update
         let t = Instant::now();
-        let polys = issuer.delete(&0.to_string()).expect("Non existing element");
+        let polys = issuer.revoke_instant(&0.to_string()).expect("Non existing element");
         println!(
             "Time to remove one element and compute update polynomials: {:?}",
             t.elapsed()
@@ -300,10 +325,9 @@ mod tests {
 
         // Revoke ADD_SIZE/2 elements and compute update polys
         let num_deletions = ADD_SIZE / 2;
-        let t = Instant::now();
         let deletions: Vec<String> = (0..num_deletions).map(|i| i.to_string()).collect();
-        issuer.remove_elements(deletions.as_slice());
-        let polys = issuer.update();
+        let t = Instant::now();
+        let polys = issuer.revoke_elements_instant(deletions.as_slice());
         println!(
             "Time to revoke {num_deletions} witness and compute update polynomials: {:?}",
             t.elapsed()
@@ -327,6 +351,87 @@ mod tests {
     }
 
     #[test]
+    fn issuer_mixed_batch_single_update() {
+        // Setup issuer
+        let mut issuer = Issuer::new(None);
+        
+        // Compute witnesses for ADD_SIZE elements
+        let mut elements = Vec::new();
+        let mut witness = Vec::new();
+        (0..ADD_SIZE).for_each(|i| {
+            let rh = issuer.add(i.to_string()).expect("Cannot add witness");
+            witness.push(rh.get_witness());
+            elements.push(rh.get_elem());
+        });
+
+        let mut polys = Vec::new();
+
+        // Delete one of the elements and compute update
+        let t = Instant::now();
+        polys.push(issuer.revoke_instant(&1.to_string()).expect("Non existing element"));
+        println!(
+            "Time to remove one element and compute update polynomials: {:?}",
+            t.elapsed()
+        );
+
+        // Delete one of the elements without updating
+        let t = Instant::now();
+        let revoked_pseudos: Vec<String> =  (2..ADD_SIZE/2).map(|i| i.to_string()).collect();
+        polys.push(issuer.revoke_elements_instant(&revoked_pseudos.as_slice()).expect("Non existing element"));
+        println!(
+            "Time to remove {} elements and compute update polynomials: {:?}",
+            ADD_SIZE/2-2,
+            t.elapsed()
+        );
+
+        // Delete one of the elements without updating
+        let t = Instant::now();
+        issuer.revoke(&(ADD_SIZE/2+1).to_string()).expect("Non existing element");
+        println!(
+            "Time to remove one element without computing update: {:?}",
+            t.elapsed()
+        );
+
+        // Delete one of the elements without updating
+        let t = Instant::now();
+        let revoked_pseudos: Vec<String> =  (ADD_SIZE/2+2..ADD_SIZE).map(|i| i.to_string()).collect();
+        issuer.revoke_elements(&revoked_pseudos.as_slice());
+        println!(
+            "Time to remove {} elements without computing update: {:?}",
+            ADD_SIZE-ADD_SIZE/2-2,
+            t.elapsed()
+        );
+
+        let t = Instant::now();
+        let rev_number = issuer.deletions.len();
+        polys.push(issuer.update().expect("No update poly"));
+        println!(
+            "Time to update after removal of {} elements: {:?}",
+            rev_number,
+            t.elapsed()
+        );
+
+        // Check non-revoked witness is invalid before updating and is valid after updating
+        let valid_y = elements[0];
+        let mut valid_wit = witness[0];
+        assert!(!valid_wit.verify(valid_y, issuer.get_pk(), issuer.get_accumulator()));
+        for poly in &polys{
+            valid_wit.batch_update_assign(valid_y, &poly.deletions, &poly.omegas);
+        }
+        assert!(valid_wit.verify(valid_y, issuer.get_pk(), issuer.get_accumulator()));
+
+        // Check revoked witness is always invalid
+        let revoked_y = elements[1];
+        let mut revoked_wit = witness[1];
+        assert!(!revoked_wit.verify(revoked_y, issuer.get_pk(), issuer.get_accumulator()));
+        for poly in &polys{
+            revoked_wit.batch_update_assign(revoked_y, &poly.deletions, &poly.omegas);
+        }        
+        assert!(!revoked_wit.verify(revoked_y, issuer.get_pk(), issuer.get_accumulator()));
+        assert!(issuer.deletions.is_empty())
+    }
+
+    #[test]
     fn issuer_epoch_update() {
         // Setup issuer
         let mut issuer = Issuer::new(None);
@@ -343,7 +448,7 @@ mod tests {
         // Simulate we have ADD_SIZE/2 elements to delete
         let num_deletions = ADD_SIZE / 2;
         let deletions: Vec<String> = (0..num_deletions).map(|i| i.to_string()).collect();
-        issuer.remove_elements(deletions.as_slice());
+        issuer.revoke_elements(deletions.as_slice());
 
         // Revoke removed elements and update all witnessses for valid elements
         let t = Instant::now();
