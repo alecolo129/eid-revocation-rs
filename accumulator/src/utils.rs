@@ -279,7 +279,7 @@ fn shr_assign(s: &mut Scalar, rhs: usize) {
     //Get the number of bytes that will be fully (resp. partially) zero
     let del_full = rhs >> 3;
     let del_par = (rhs % 8) as u32; 
-    let mask = 0xFF_u8>>(8 - del_par);
+    let mask = 0xFF_u8.wrapping_shr(8 - del_par);
 
     if del_par>0{
         let mut rem: u8 = 0x00; 
