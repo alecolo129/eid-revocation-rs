@@ -57,6 +57,11 @@ impl ProofParamsPublic {
         }
     }
 
+    /// Updates public parameters with input accumulator
+    pub fn update_accumulator(&mut self, acc: Accumulator){
+        self.c_m = acc.0;
+    }
+
     /// Get the accumulator used to build the params
     pub fn get_accumulator(&self)->Accumulator{
         return Accumulator::from(self.c_m);
