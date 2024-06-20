@@ -1,6 +1,5 @@
-use accumulator::accumulator::Element;
 use reqwest::{Error, RequestBuilder, Response};
-use crate::server::{WEBSERVER, REVOKE_URL, UPD_URL, SEND_WIT_URL, SEND_PARAMS_URL};
+use crate::server::{WEBSERVER, REVOKE_URL, UPD_PERIODIC_URL, SEND_WIT_URL, SEND_PARAMS_URL};
 use std::{thread::sleep, time::Duration}; 
 
  
@@ -39,7 +38,7 @@ impl Controller{
     }
 
     pub async fn update()->Result<Response,Error>{
-        let url = format!("http://{WEBSERVER}{UPD_URL}");
+        let url = format!("http://{WEBSERVER}{UPD_PERIODIC_URL}");
         let req = reqwest::Client::new().put(url);        
         return req.send().await;
     }
