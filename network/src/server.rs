@@ -97,40 +97,4 @@ async fn send_witnesses(State(state): State<AppState>)->impl IntoResponse{
 
 async fn send_params(State(state): State<AppState>)->impl IntoResponse{
     let iss = state.iss.lock().unwrap().to_owned();
-    let pp = iss.get_proof_params();
-    let url = format!("http://{BASE_REGISTRY_BACK}{PARAMS_URL}");
-    match bincode::serialize(&pp){
-        Ok(payload) => {
-            let resp = reqwest::Client::new().put(url).body(payload).send().await.unwrap();
-            match resp.status().is_success(){
-                true => (StatusCode::OK, "ok".to_string()),
-                false => (StatusCode::INTERNAL_SERVER_ERROR, "Not accepted".to_string())
-            }
-        }
-        Err(e) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        }
-    }
-    
-}
-
-#[tokio::main]
-pub async fn run() {
-    let iss = Issuer::new(Some(b"test"));
-    let shared_state = AppState{iss: Arc::new(Mutex::new(iss)), update_polys: Arc::new(Mutex::new(Vec::new()))};
-
-    // build our application with a single route
-    let app = Router::new()
-        .route(ISSUE_URL, post(issue)).with_state(shared_state.clone())
-        .route(REVOKE_URL, delete(revoke)).with_state(shared_state.clone())
-        .route(REVOKE_BATCH_URL, delete(revoke_batch)).with_state(shared_state.clone())
-        .route(UPD_URL, put(update)).with_state(shared_state.clone())
-        .route(UPD_PERIODIC_URL, put(update_periodic)).with_state(shared_state.clone())
-        .route(SEND_PARAMS_URL, get(send_params)).with_state(shared_state.clone())
-        .route(SEND_WIT_URL, get(send_witnesses)).with_state(shared_state.clone())
-    ;
-
-    // run our app with hyper, listening globally on port 1234
-    let listener = tokio::net::TcpListener::bind(WEBSERVER).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
-}
+    let pp = iss.get_proof_pa
