@@ -2,7 +2,7 @@ use std::usize;
 use ark_ff::Zero;
 use bls12_381_plus::{elliptic_curve::hash2curve::ExpandMsgXof, G1Projective, Scalar};
 use digest::{ExtendableOutput, Update, XofReader};
-use group::ff::Field;
+use group::ff::{Field, PrimeField};
 use rand_core::{CryptoRng, RngCore};
 use sha3::Shake256;
 
@@ -95,6 +95,7 @@ impl PolynomialG1 {
         ret
     }
 
+
         
     /// Optimized implementation of multi-scalar multiplication adapted from ark-ec library. 
     pub fn msm(&self, x: &Scalar) -> Option<G1Projective> {
@@ -142,7 +143,7 @@ impl PolynomialG1 {
                     let mut scalar = scalar.clone();
                     // Extract the `c` bits correspondig to our window:
                     // Right-shift by w_start to remove the lower bits
-                    shift_right_assign(&mut scalar, w_start);
+                    shr_assign(&mut scalar, w_start);
                     // Apply mod 2^{window size} to the result to remove the higher bits
                     apply_modulo2(&mut scalar, c);
 
@@ -229,15 +230,16 @@ pub fn window_mul(point: G1Projective, coefficients: Vec<Scalar>)-> Vec<G1Projec
         // Result of the multiplication            
         let mut res = zero;
         window_starts.iter().rev().for_each(|&w_start|{
-            let mut scalar = coeff;
+            let mut coeff = coeff.clone();
             
             // Extract the `c` bits of the scalar for our current window
             // Shift right to remove LSB, apply modulo 2 to remove MSB
-            shift_right_assign(&mut scalar, w_start);
-            apply_modulo2(&mut scalar, c);
+            shr_assign(&mut coeff, w_start);
+            apply_modulo2(&mut coeff, c);
 
             // Get the index on the precomputed table
-            let index = scalar_to_usize(&scalar);
+            let index = scalar_to_usize(&coeff);
+
             if index!=0{
                 res+=table[index-1];
             }
@@ -260,44 +262,52 @@ fn scalar_to_usize(s: &Scalar) -> usize {
     usize::from_be_bytes(bytes)
 }
 
-/// Performs the >>= operator on the scalar `s`.
-fn shift_right_assign(s: &mut Scalar, rhs: usize){
-    /*TODO: do it in one pass */
+/// Performs the >>= operator to a Scalar.
+#[inline]
+fn shr_assign(s: &mut Scalar, rhs: usize) {
+    // The default implementation in bls12-381-plus::Scalar is inefficient and works only when s is multiple of 2
+    // If bits to shift are more than Scalar bits, we set scalar to 0
+    
     let mut bytes = s.to_be_bytes();
-    let rhs = usize::min(rhs, bytes.len()*8);
-    
-    //Get the number of bytes that will be fully (resp. partially) zeroed
-    let del_full = rhs / 8;
+    if rhs >= (Scalar::NUM_BITS as usize){
+        bytes.fill(0);
+        *s = Scalar::from_be_bytes(&bytes).unwrap();
+        return;
+    }
+
+    /*TODO: do this in one pass */
+    //Get the number of bytes that will be fully (resp. partially) zero
+    let del_full = rhs >> 3;
     let del_par = (rhs % 8) as u32; 
-    
+    let mask = 0xFF_u8>>(8 - del_par);
 
     if del_par>0{
         let mut rem: u8 = 0x00; 
         for i in 0..bytes.len(){
-            let temp = bytes[i] & (0xFF_u8>>(8 - del_par)); 
+            let temp = bytes[i] & mask; 
             bytes[i] >>= del_par;
             bytes[i] += rem;
             rem = temp<<(8 - del_par);
         }
     }
-
+        
     for i in (del_full..bytes.len()).rev(){
-        bytes[i]=bytes[i-del_full]
-       
+        bytes[i]=bytes[i-del_full];
+    
     }
     for i in 0..del_full{
-        bytes[i].set_zero();
+        bytes[i] = 0;
     }
-
     *s = Scalar::from_be_bytes(&bytes).unwrap();
 }
 
 /// Clear the first `n` bits of the Scalar `s`, starting from the MSB
 fn clear_left_bits(s: &mut Scalar, n: usize){
     let mut bytes = s.to_be_bytes();
-    let k = usize::min(bytes.len()*8, n);
+
+    let k = usize::min(Scalar::NUM_BITS as usize, n);
     
-    let zeros = k/8;
+    let zeros = k>>3;
     let remainder = k%8;
 
     for i in 0..zeros{
@@ -315,6 +325,7 @@ fn clear_left_bits(s: &mut Scalar, n: usize){
 fn apply_modulo2(s: &mut Scalar, n: usize){
     clear_left_bits(s, 32*8-n);    
 }
+
 
 
 impl core::ops::AddAssign for PolynomialG1 {
@@ -478,10 +489,55 @@ mod tests {
     use core::time;
     use std::time::{Instant, SystemTime};
 
-    use group::Group;
+    use group::{ff::PrimeField, Group};
     use rand::{random, rngs::OsRng};
 
     use super::*;
+    
+    #[test]
+    fn utils_test_shr(){
+        // Pick random u128 
+        let mut bytes = [0u8; 16];
+        rand_core::OsRng{}.fill_bytes(&mut bytes);
+        let mut int = u128::from_be_bytes(bytes);
+
+        // Two scalar representations of integer
+        let mut s = Scalar::from_u128(int); 
+        let mut s2 = s.clone();
+
+        //Pick random shift value and apply mod to avoid huge rhs
+        let mut rhs = [0u8; 8];
+        rand_core::OsRng{}.fill_bytes(&mut rhs);
+        let mut rhs = usize::from_be_bytes(rhs);
+        rhs %= Scalar::BYTES+2;
+        let rhs = 16;
+
+        // u128 shr_assign
+        let t1 = Instant::now();
+        int >>= rhs;
+        let t1 = t1.elapsed();
+
+
+        // Function shr_assign
+        let t2 = Instant::now();
+        shr_assign(&mut s, rhs);
+        let t2 = t2.elapsed();
+
+        // Scalar shr_assign
+        let t3 = Instant::now();
+        s2 >>= rhs;
+        let t3 = t3.elapsed(); 
+        
+
+        // check my implementation gives correct result
+        assert_eq!(Scalar::from_u128(int), s);
+
+        println!("Compute shift u128: {:?}", t1);
+        println!("Compute shift Scalar optimized: {:?}", t2);
+        println!("Compute shift scalar built-in: {:?}", t3);
+        
+    }
+    
     #[test]
     fn utils_test_mul(){
         let size = 10_000;
@@ -510,7 +566,7 @@ mod tests {
     #[test]
     fn utils_test_eval(){
         
-        let d = 9;
+        let d = 1_000;
         let mut p = PolynomialG1::with_capacity(d);
         for i in 0..d{
             p.0.push(G1Projective::random(rand_core::OsRng{}));
