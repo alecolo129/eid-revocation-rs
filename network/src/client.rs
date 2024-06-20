@@ -1,5 +1,5 @@
 use crate::{
-    base_registry::{BASE_REGISTRY_FRONT, PARAMS_URL, WIT_UPD_URL},
+    base_registry::{BASE_REGISTRY_FRONT, PARAMS_URL, WIT_URL},
     server::{ISSUE_URL, WEBSERVER},
 };
 use accumulator::{
@@ -24,7 +24,7 @@ impl Client {
     }
 
     pub async fn ask_update(hol: &mut Holder) -> Result<bool, Box<dyn std::error::Error>> {
-        let url = format!("http://{BASE_REGISTRY_FRONT}{WIT_UPD_URL}");
+        let url = format!("http://{BASE_REGISTRY_FRONT}{WIT_URL}");
         let req = reqwest::Client::new()
             .get(url)
             .query(&[("pseudo", hol.get_pseudo())]);
