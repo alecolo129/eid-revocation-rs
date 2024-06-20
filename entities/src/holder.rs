@@ -1,5 +1,5 @@
 use accumulator::{
-    accumulator::Element, proof::{self, PROOF_LABEL, Proof, ProofParamsPublic}, witness::{Deletion, MembershipWitness}, Coefficient, Error, ProofParamsPrivate
+    accumulator::Element, proof::{self, PROOF_LABEL, Proof, ProofParamsPublic}, witness::{Deletion, MembershipWitness}, Error, ProofParamsPrivate
 };
 use crate::{issuer::RevocationHandle, UpdatePolynomials};
 
