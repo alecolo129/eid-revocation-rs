@@ -212,6 +212,10 @@ impl Issuer {
         self.acc
     }
 
+    pub fn get_accumulator_id(&self) -> Scalar {
+        self.acc.get_id()
+    }
+
     pub fn get_pk(&self) -> PublicKey {
         return self.acc_pk.clone();
     }
