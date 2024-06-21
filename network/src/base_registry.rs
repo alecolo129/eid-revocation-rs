@@ -14,10 +14,8 @@ use serde::Deserialize;
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
-    ops::Bound::{Excluded, Included},
     sync::{Arc, Mutex},
 };
-use tokio::time::Instant;
 
 pub const BASE_REGISTRY_FRONT: &str = "127.0.0.1:3000";
 pub const PARAMS_URL: &str = "/parameteres/proof-params";
