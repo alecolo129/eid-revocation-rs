@@ -3,10 +3,9 @@ use axum::{
     body::Bytes, extract::State, http::StatusCode, response::IntoResponse, routing::{get, delete, post, put}, Router
 };
 use entities::{issuer::Issuer, UpdatePolynomials};
-use reqwest::{Response, Error};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-use crate::base_registry::{BASE_REGISTRY_BACK, WIT_URL, PARAMS_URL, POLYS_URL};
+use crate::{base_registry::{BASE_REGISTRY_BACK, PARAMS_URL, POLYS_URL, WIT_URL}, log_with_time, log_with_time_ln};
 
 pub const WEBSERVER: &str = "127.0.0.1:1234";
 pub const ISSUE_URL: &str = "/accumulator/issue";
@@ -64,6 +63,11 @@ async fn update(State(state): State<AppState>)->impl IntoResponse{
 
     let upd_poly;
     let new_acc;
+    
+    log_with_time!(
+        "Server starts computation of update poly...",
+    );
+
     {
         let mut iss = state.iss.lock().expect("Posoned mutex");
         upd_poly = iss.update();
@@ -71,7 +75,13 @@ async fn update(State(state): State<AppState>)->impl IntoResponse{
     }
     
     match upd_poly{
-        Some(upd_poly) => {    
+        Some(upd_poly) => {  
+            
+            log_with_time_ln!(
+                "Server finished computing update poly for {} revocations.",
+                upd_poly.deletions.len()
+            );  
+            
             let url = format!("http://{}{}", BASE_REGISTRY_BACK, POLYS_URL);
             let body = bincode::serialize(&Update(new_acc, upd_poly)).expect("Error while serializing update");        
             match reqwest::Client::new().put(url).body(body).send().await {
@@ -85,7 +95,15 @@ async fn update(State(state): State<AppState>)->impl IntoResponse{
 
 async fn update_periodic(State(state): State<AppState>)->impl IntoResponse{
     let mut iss = state.iss.lock().expect("Posoned mutex");
+    log_with_time!(
+        "Server starts computing updated witnesses for {} elemets.",
+        iss.get_witnesses().len()
+    );
     iss.update_periodic();
+    log_with_time_ln!(
+        "Done.",
+    );
+
     (StatusCode::OK, "ok".to_string())
 }
 
@@ -95,7 +113,6 @@ async fn send_witnesses(State(state): State<AppState>)->impl IntoResponse{
     {
         let iss = state.iss.lock().expect("Poisoned mutex");
         updates = iss.get_witnesses();
-        println!("{:?}", updates);
     }
     let url = format!("http://{}{}", BASE_REGISTRY_BACK, WIT_URL);
     let body = bincode::serialize(&updates).unwrap();
