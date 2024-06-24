@@ -1,8 +1,9 @@
 use accumulator::Accumulator;
 use axum::{
-    extract::{State,Json}, http::StatusCode, response::IntoResponse, routing::{get, delete, post, put}, Router
+    body::Bytes, extract::State, http::StatusCode, response::IntoResponse, routing::{get, delete, post, put}, Router
 };
 use entities::{issuer::Issuer, UpdatePolynomials};
+use reqwest::{Response, Error};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use crate::base_registry::{BASE_REGISTRY_BACK, WIT_URL, PARAMS_URL, POLYS_URL};
@@ -17,55 +18,69 @@ pub const SEND_WIT_URL: &str = "/controller/witnesses/send";
 pub const SEND_PARAMS_URL: &str = "/controller/params/send";
 
 #[derive(Serialize, Deserialize)]
-pub struct Update(pub Accumulator, pub Vec<UpdatePolynomials>);
+pub struct Update(pub Accumulator, pub UpdatePolynomials);
 
 #[derive(Clone)]
 struct AppState {
     iss: Arc<Mutex<Issuer>>,
-    update_polys: Arc<Mutex<Vec<UpdatePolynomials>>>,
 }
 
 
-async fn issue(State(state): State<AppState>, pseudo: String) -> impl IntoResponse{
+async fn issue(State(state): State<AppState>, pseudo: String) -> axum::response::Response{
     let mut iss = state.iss.lock().unwrap();
     //check validity of pseudo against some Issuer's policy
 
     let rh = iss.add(pseudo);
     match rh {    
-        Some(rh) => (StatusCode::CREATED, bincode::serialize(&rh).expect("Serialization error").into_response()),
-        None => (StatusCode::BAD_REQUEST, "Cannot issue already accumulated element".to_string().into_response())
+        Some(rh) => (StatusCode::CREATED, bincode::serialize(&rh).expect("Serialization error")).into_response(),
+        None => (StatusCode::BAD_REQUEST, "Cannot issue already accumulated element").into_response()
     }  
 }   
 
-async fn revoke(State(state): State<AppState>, pseudo: String)-> (StatusCode, String){
+async fn revoke(State(state): State<AppState>, pseudo: String) -> axum::response::Response{
     let mut iss = state.iss.lock().unwrap();
-    iss.revoke(&pseudo);
-    (StatusCode::OK, "ok".to_string())
+    match iss.revoke(&pseudo){
+        Some(_) => (StatusCode::OK, "ok").into_response(), 
+        None => (StatusCode::NOT_FOUND, "Cannot revoke non accumulated element").into_response()
+    }
 }
 
-async fn revoke_batch(State(state): State<AppState>, pseudo: Json<Vec<String>>)-> (StatusCode, String){
-    let mut iss = state.iss.lock().unwrap();
-    iss.revoke_elements(pseudo.0.as_slice());
-    (StatusCode::OK, "ok".to_string())
+async fn revoke_batch(State(state): State<AppState>, payload: Bytes)-> axum::response::Response{
+    let pseudos = bincode::deserialize::<Vec<String>>(&payload);
+    match pseudos{
+        Ok(pseudos) =>{
+            let mut iss = state.iss.lock().unwrap();
+            iss.revoke_elements(pseudos.as_slice());
+            StatusCode::OK.into_response()
+        }
+        Err(_) => {
+            (StatusCode::BAD_REQUEST, "Cannot parse request").into_response()
+        }
+    }
 }
 
 
 async fn update(State(state): State<AppState>)->impl IntoResponse{
 
-    let mut iss = state.iss.lock().expect("Posoned mutex");
-    let upd_poly = iss.update();
-    let new_id = iss.get_accumulator_id();
-    drop(iss);
-
+    let upd_poly;
+    let new_acc;
+    {
+        let mut iss = state.iss.lock().expect("Posoned mutex");
+        upd_poly = iss.update();
+        new_acc = iss.get_accumulator();
+    }
+    
     match upd_poly{
-        Some(upd_poly) => {
-            let mut polys = state.update_polys.lock().expect("Posioned mutex");
-            polys.push(upd_poly);
-            (StatusCode::OK, "ok".to_string())
+        Some(upd_poly) => {    
+            let url = format!("http://{}{}", BASE_REGISTRY_BACK, POLYS_URL);
+            let body = bincode::serialize(&Update(new_acc, upd_poly)).expect("Error while serializing update");        
+            match reqwest::Client::new().put(url).body(body).send().await {
+                Ok(_) => (StatusCode::OK, "ok".to_string()),
+                Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+            }
         },
         None =>  (StatusCode::BAD_REQUEST, "Cannot create update poly".to_string())
     }
-   
 }
 
 async fn update_periodic(State(state): State<AppState>)->impl IntoResponse{
@@ -74,13 +89,6 @@ async fn update_periodic(State(state): State<AppState>)->impl IntoResponse{
     (StatusCode::OK, "ok".to_string())
 }
 
-async fn send_updates(State(state): State<AppState>)->impl IntoResponse{
-    let updates= state.update_polys.lock().expect("Poisoned mutex").to_owned();
-    let url = format!("http://{}{}", BASE_REGISTRY_BACK, POLYS_URL);
-    let body = bincode::serialize(&updates).unwrap();
-    let _resp = reqwest::Client::new().put(url).body(body).send().await;
-    (StatusCode::OK, "ok".to_string())
-}
 
 async fn send_witnesses(State(state): State<AppState>)->impl IntoResponse{
     let updates;
@@ -117,7 +125,7 @@ async fn send_params(State(state): State<AppState>)->impl IntoResponse{
 #[tokio::main]
 pub async fn run() {
     let iss = Issuer::new(Some(b"test"));
-    let shared_state = AppState{iss: Arc::new(Mutex::new(iss)), update_polys: Arc::new(Mutex::new(Vec::new()))};
+    let shared_state = AppState{iss: Arc::new(Mutex::new(iss))};
 
     // build our application with a single route
     let app = Router::new()
