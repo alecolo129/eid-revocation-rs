@@ -1,7 +1,8 @@
 use accumulator::{
-    accumulator::Element, proof::{self, PROOF_LABEL, Proof, ProofParamsPublic}, witness::{Deletion, MembershipWitness}, Error, ProofParamsPrivate
+    accumulator::Element, proof::{self, Proof, ProofParamsPublic, PROOF_LABEL}, witness::{Deletion, MembershipWitness}, Accumulator, Error, ProofParamsPrivate
 };
 use crate::{issuer::RevocationHandle, UpdatePolynomials};
+use crate::Updatable;
 
 use bls12_381_plus::Scalar;
 
@@ -52,11 +53,6 @@ impl Holder {
         self.w = new_mw;
     }
 
-    /// Replace the holder's public parameters with the new parameters `pub_params`.
-    pub fn replace_public_params(&mut self, pub_params: ProofParamsPublic) {
-        self.pp = pub_params;
-    }
-
     /// Test membership of the holder's witness against the accumulator contained 
     /// in the proof parameters `pp` received as input or in the cached parameters. 
     pub fn test_membership(&self, pub_params: Option<ProofParamsPublic>)->bool{
@@ -86,6 +82,19 @@ impl Holder {
     /// Returns the pseudonym associated to the holder.
     pub fn get_pseudo(&self) -> String{
         return self.pseudo.clone();
+    }
+}
+
+impl Updatable for Holder{
+
+    /// Update the holder's public parameters with the new parameters `new_pp`.
+    fn update_public_params(&mut self, new_pp: ProofParamsPublic) {
+        self.pp = new_pp;
+    }
+
+    /// Update the holder's accumulator with the new accumulator `new_acc`.
+    fn update_accumulator(&mut self, new_acc: Accumulator) {
+        self.pp.update_accumulator(new_acc);
     }
 }
 
