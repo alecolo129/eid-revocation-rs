@@ -3,6 +3,8 @@ use accumulator::{
 };
 use crate::{issuer::RevocationHandle, UpdatePolynomials};
 
+use bls12_381_plus::Scalar;
+
 #[derive(Debug)]
 pub struct Holder {
     pseudo: String,
@@ -74,6 +76,11 @@ impl Holder {
 
         let challenge_hash = Element::from_transcript(PROOF_LABEL, &mut transcript);
         return pc.gen_proof(challenge_hash);
+    }
+
+    /// Returns the id of the the holder's accumulator.
+    pub fn get_accumulator_id(&self) -> Scalar{
+        self.pp.get_accumulator().get_id()
     }
 
     /// Returns the pseudonym associated to the holder.
