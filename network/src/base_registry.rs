@@ -48,7 +48,7 @@ struct AppState {
 
 /// Updates the state public parameters with public parameters in the request payload
 async fn replace_public_params(State(state): State<AppState>, payload: Bytes) -> Response {
-    match bincode::deserialize::<ProofParamsPublic>(&payload.to_owned()) {
+    match bincode::deserialize::<ProofParamsPublic>(&payload) {
         Ok(pp) => {
             log_with_time_ln!(
                 "Base Registry: public params received"
@@ -73,7 +73,7 @@ async fn replace_public_params(State(state): State<AppState>, payload: Bytes) ->
 /// Uses the revocation updates contained in the request payload 
 /// to update the accumulator state and store new update polynomials
 async fn update_after_revocation(State(state): State<AppState>, payload: Bytes) -> Response {
-    match bincode::deserialize::<crate::server::Update>(&payload.to_owned()) {
+    match bincode::deserialize::<crate::server::Update>(&payload) {
         Ok(update) => {
 
             // Get inputs
@@ -123,7 +123,7 @@ async fn update_after_revocation(State(state): State<AppState>, payload: Bytes) 
 /// that is passed in the payload
 async fn get_update_polys(State(state): State<AppState>, payload: Bytes) -> Response {
 
-    match bincode::deserialize::<Scalar>(&payload.to_owned()) {
+    match bincode::deserialize::<Scalar>(&payload) {
         Ok(acc_id) => {
             log_with_time_ln!(
                 "Base Registry: get update polynomials called",
@@ -161,7 +161,7 @@ async fn get_update_polys(State(state): State<AppState>, payload: Bytes) -> Resp
 
 /// Updates the list of witnesses in the state with those included in the payload
 async fn upd_witnesses(State(state): State<AppState>, body: Bytes) -> Response {
-    match bincode::deserialize::<HashMap<String, MembershipWitness>>(&body.to_owned()) {
+    match bincode::deserialize::<HashMap<String, MembershipWitness>>(&body) {
         Ok(map) => {
             
             log_with_time!(
