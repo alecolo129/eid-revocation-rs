@@ -3,6 +3,7 @@ use merlin::Transcript;
 use accumulator::{
     accumulator::Accumulator, proof::{self, Proof, ProofParamsPublic}
 };
+use crate::Updatable;
 
 #[derive(Debug)]
 pub struct Verifier {
@@ -17,21 +18,7 @@ impl Verifier {
         Self {
             params
         }
-    }
-
-    /// Updates stored proof params incorporating new accumulator value `acc`.
-    pub fn update_acc(&mut self, acc: Accumulator) -> Accumulator{
-        let old_acc = self.params.c_m;
-        self.params.c_m = acc.0;
-        return Accumulator(old_acc);
-    }   
-
-    /// Updates stored proof params with input parameters `params`.
-    pub fn update_params(&mut self, params: ProofParamsPublic)->ProofParamsPublic{
-        let old_params = self.params;
-        self.params = params;
-        return old_params;
-    }   
+    }  
     
     /// Verifies the input membership proof `mem_proof` against the stored proof parameters.
     pub fn verify(&self, mem_proof: Proof)->bool{
@@ -40,6 +27,19 @@ impl Verifier {
 
         let final_proof = mem_proof.finalize(&self.params);
         return final_proof.verify(&mut transcript);
+    }
+}
+
+impl Updatable for Verifier{
+
+    /// Update the verifier's public parameters with the new parameters `new_pp`.
+    fn update_public_params(&mut self, new_pp: ProofParamsPublic) {
+        self.params = new_pp;
+    }
+
+    /// Update the verifier's accumulator with the new accumulator `new_acc`.
+    fn update_accumulator(&mut self, new_acc: Accumulator) {
+        self.params.update_accumulator(new_acc);
     }
 }
 
