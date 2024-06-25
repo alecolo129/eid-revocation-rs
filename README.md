@@ -1,4 +1,4 @@
-# eID Revocation
+# Swiss e-ID Revocation
 
 This repository contains a proof-of-concept implementation of an accumulator-based proposal for revoking electronic identities in the context of Scenario B of the [Swiss eID Community](https://github.com/e-id-admin/open-source-community/blob/main/discussion-paper-tech-proposal/discussion-paper-tech-proposal.md).
 
@@ -9,7 +9,7 @@ This repository contains the following packages:
 
 - `entities`: implements the main roles defined in the [Swiss Trust Infrastructure](https://github.com/e-id-admin/open-source-community/blob/main/discussion-paper-tech-proposal/discussion-paper-tech-proposal.md) (i.e., *Issuer*, *Holder*, and *Verifier*) making use of the cryptographic functions implemented in the `accumulator` package; 
 
-- `networking`: provides basic server implementations for the *Base Registry* and the *Issuer*. It also contains wrappers around *Holder* and *Verifier* for conveniently querying the servers.
+- `network`: provides basic server implementations for the *Base Registry* and the *Issuer*. It also contains wrappers around *Holder* and *Verifier* for conveniently querying the servers.
 
 More details can be found in the respective folders.
 
