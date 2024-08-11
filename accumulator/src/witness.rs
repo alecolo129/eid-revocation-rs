@@ -432,8 +432,8 @@ mod tests {
     #[test]
     fn wit_test_update() {
         let upd_size = 1_001;
-        //wit_sequential_update(upd_size);
-        //wit_batch_update(upd_size);
+        wit_sequential_update(upd_size);
+        wit_batch_update(upd_size);
         wit_batch_updates(100, 100);
     }
 
