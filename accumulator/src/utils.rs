@@ -1,5 +1,5 @@
 use std::usize;
-use ark_ff::Zero;
+use ark_ff::{One, Zero};
 use bls12_381_plus::{elliptic_curve::hash2curve::ExpandMsgXof, G1Projective, Scalar};
 use digest::{ExtendableOutput, Update, XofReader};
 use group::ff::{Field, PrimeField};
@@ -55,7 +55,6 @@ impl PolynomialG1 {
     pub fn with_capacity(_size: usize) -> Self {
         Self(Vec::new())
     }
-
 
     /// Return the result of evaluating the polynomial with the specified point `x`. If the polynomial is empty return `None`.
     /// 
@@ -196,6 +195,10 @@ impl PolynomialG1 {
                     }
                     total
                 }))
+    }
+
+    pub fn degree(&self)->usize{
+        self.0.len()-1
     }
 }
 
@@ -351,6 +354,89 @@ impl core::ops::MulAssign<Scalar> for PolynomialG1 {
     }
 }
 
+
+/// Optimized implementation of multi-scalar multiplication adapted from ark-ec library. 
+pub fn msm(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Projective> {
+    println!("Omegas: {:?}\nScalars:{:?}", coeff.len(),scalars.len());
+
+    /*
+        TODO: consider rewriting library using ark-ec and adopting their implementation of msm. 
+    */
+
+    // If the polynomial is empty we return None
+    if coeff.is_empty() || coeff.len() != scalars.len(){
+        return None;
+    }
+
+    
+    // Get an iterator with coefficients and scalars pairs (c_1, 1), (c_2,x), ..., (c_d, x^d) 
+    let scalars_and_coeff_iter = scalars.iter().zip(coeff.clone());
+    
+    // Get widow size
+    let c = match scalars.len() {
+        size if size>=32 => (usize::ilog2(size) * 69 / 100) as usize + 2,
+        _ => 3
+    };
+
+    // Get indexes of msm windows
+    let num_bits = Scalar::BYTES*8 as usize;
+    let window_starts: Vec<_> = (0..num_bits).step_by(c).collect();
+    let zero = G1Projective::IDENTITY;
+    
+    // Each window is of size `c`.
+    // We divide up the bits 0..num_bits into windows of size `c`, and
+    // process each such window.
+    let window_sums: Vec<_> = window_starts.into_iter()
+        .map(|w_start| {
+            let mut res = zero;
+            // We don't need the "zero" bucket, so we only have 2^c - 1 buckets.
+            let mut buckets = vec![zero; (1 << c) - 1];
+            scalars_and_coeff_iter.clone().for_each(|(&scalar, base)| {                    
+
+                let mut scalar = scalar.clone();
+                // Extract the `c` bits correspondig to our window:
+                // Right-shift by w_start to remove the lower bits
+                shr_assign(&mut scalar, w_start);
+                // Apply mod 2^{window size} to the result to remove the higher bits
+                apply_modulo2(&mut scalar, c);
+
+                // The remaining extracted bits form our index in the bucket
+                let index = scalar_to_usize(&scalar);
+                
+                // If the scalar is non-zero, we update the corresponding
+                // bucket.
+                if index != 0 {
+                    buckets[index - 1] += base;
+                }
+                
+            });
+
+            let mut running_sum = G1Projective::IDENTITY;
+            buckets.into_iter().rev().for_each(|b| {
+                running_sum += &b;
+                res += &running_sum;
+            });
+            res
+        })
+        .collect();
+
+    // We store the sum for the lowest window.
+    let lowest = *window_sums.first().unwrap();
+    
+    // We're traversing windows from high to low.
+    Some(lowest
+        + &window_sums[1..]
+            .iter()
+            .rev()
+            .fold(zero, |mut total, sum_i| {
+                total += sum_i;
+                for _ in 0..c {
+                    total = total.double();
+                }
+                total
+            }))
+}
+
 /// A Polynomial for scalars
 #[derive(Default, Clone)]
 pub struct Polynomial(pub Vec<Scalar>);
@@ -484,11 +570,50 @@ impl core::ops::MulAssign<Scalar> for Polynomial {
 }
 
 
+
+fn aggregate_d(omegas: &Vec<PolynomialG1>, scalars: &Vec<Scalar>, e: Scalar) -> Vec<Scalar>{
+    let max_deg = omegas.iter().max_by(|x, y| x.degree().cmp(&y.degree())).unwrap().degree();
+
+    // Pre-compute all required powers of the input element
+    let mut powers = Vec::<Scalar>::with_capacity(max_deg);
+    powers.push(Scalar::one());
+    (1..=max_deg).for_each(|i|{powers.push(powers[i-1]*e);});
+    
+    // Scalar vector
+    let mut scalars_ret = Vec::new();
+    omegas.iter().enumerate().for_each(|(j, omega)|{
+        (0..=omega.degree()).for_each(|i|{
+            scalars_ret.push(scalars[j]*powers[i]);
+        })
+    });
+    scalars_ret
+}
+
+
+pub fn aggregate_eval_omega(omegas: Vec<PolynomialG1>, scalars: &Vec<Scalar>, e: Scalar)->Option<G1Projective>{
+    if omegas.len() == 0 || omegas.len()!= scalars.len(){
+        return None;
+    }
+    let max_deg = omegas.iter().max_by(|x, y| x.degree().cmp(&y.degree())).unwrap().degree();
+
+
+    // Pre-compute all required powers of the input element
+    let mut powers = Vec::<Scalar>::with_capacity(max_deg);
+    powers.push(Scalar::one());
+    (1..=max_deg).for_each(|i|{powers.push(powers[i-1]*e);});
+    
+    // Scalar vector
+    let scalars = aggregate_d(&omegas, scalars, e);
+
+    //Point Vector
+    let omega: Vec<G1Projective> = omegas.into_iter().map(|p| p.0).flatten().collect();
+    msm(&omega, &scalars)
+}
+
 #[cfg(test)]
 mod tests {
     use core::time;
-    use std::time::{Instant, SystemTime};
-
+    use std::time::{Duration, Instant, SystemTime};
     use group::{ff::PrimeField, Group};
     use rand::{random, rngs::OsRng};
 
@@ -588,5 +713,85 @@ mod tests {
         assert_eq!(r1, r2);
         
     }
+
+
+
+    #[test]
+    fn utils_test_msm(){
+        
+        let d = 1_000;
+        let mut p = PolynomialG1::with_capacity(d);
+        for i in 0..d{
+            p.0.push(G1Projective::random(rand_core::OsRng{}));
+        }
+
+        let x = Scalar::random(rand_core::OsRng{});
+        
+        let t1 = Instant::now();
+        let r1 = p.msm(&x).unwrap();
+        let t1 = t1.elapsed();
+
+        let inner_p = p.0.clone();
+        let p = vec![p];
+        
+        let t2 = Instant::now();
+        let scalars = aggregate_d(&p, &vec![Scalar::ONE], x);
+        let r2 = msm(&inner_p, &scalars).unwrap();
+        let t2 = t2.elapsed();
+
+        println!("Evaluate msm method: {:?}", t1);
+        println!("Evaluate msm fun: {:?}", t2);
+
+        assert_eq!(r1, r2);
+        
+    }
+
+    /* 
+    #[test]
+    fn utils_test_aggregate_eval(){
+        
+        let n = 100;
+        let d = 100;
+        
+        let mut omegas: Vec<PolynomialG1> = Vec::with_capacity(n);
+        for i in (0..n){
+            let mut p = PolynomialG1::with_capacity(d);
+            for i in 0..d{
+                p.0.push(G1Projective::random(rand_core::OsRng{}));
+            }
+            omegas.push(p);
+        }
+
+        let mut ds: Vec<Polynomial> = Vec::with_capacity(n);
+        for i in (0..n){
+            let mut p  = Polynomial::with_capacity(d);
+            for i in 0..d{
+                p.0.push(Scalar::random(rand_core::OsRng{}));
+            }
+            ds.push(p);
+        }
+
+        let x = Scalar::random(rand_core::OsRng{});
+        
+        let mut r1 = G1Projective::IDENTITY;
+        let mut t1 = Duration::from_millis(0); 
+        omegas.iter().for_each(|p|{
+                let t = Instant::now();
+                let tmp = p.msm(&x).unwrap();
+                let t = t.elapsed();
+                r1+=tmp; t1+=t;
+            }
+        );
+
+        let t2 = Instant::now();
+        let r2 = aggregate_eval_omega(omegas, &ds, x).unwrap();
+        let t2 = t2.elapsed();
+
+        assert_eq!(r1, r2);
+
+        println!("Evaluate {n} degree {d} poly without aggregation: {:?}", t2);
+        println!("Evaluate {n} degree {d} poly using aggregation: {:?}", t2);
+        
+    }*/
 
 }
