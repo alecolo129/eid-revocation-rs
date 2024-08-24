@@ -15,16 +15,15 @@ rand_core = {version = "0.6.4", features = ["std"] }
 accumulator = { version = "0.1.0", path = "./accumulator" }
 entities = { version = "0.1.0", path = "./entities" }
 network = { version = "0.1.0", path = "./network" }
+agora-allosaurus-rs = { git = "https://github.com/hyperledger-labs/agora-allosaurus-rs" }
+rand = "0.8.5"
 
 [dev-dependencies]
 criterion = "0.4"
 serde_bare = "0.5"
 
+
 [[bench]]
-name = "updates"
+name = "verification"
 harness = false
 
-[[bin]]
-name = "main"
-path = "./network/src/main.rs"
-harness = false
