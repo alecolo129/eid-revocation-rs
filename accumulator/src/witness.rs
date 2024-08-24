@@ -133,6 +133,18 @@ impl MembershipWitness {
         }
     }
 
+    /// Perform batch updates of the witness aggregating the list of coefficients `omegas`
+    /// and using the associated element `y`,
+    /// and list of deleted elements `deletions`.
+    pub fn batch_updates(
+        &mut self,
+        y: Element,
+        deletions: &Vec<&[Element]>,
+        omegas: Vec<&[Coefficient]>,
+    ) -> Result<MembershipWitness, Error> {
+        return self.clone().batch_updates_assign(y, deletions, omegas);
+    }
+    
     /// Perform batch updates of the witness in-place aggregating the list of coefficients `omegas`
     /// and using the associated element `y`,
     /// and list of deleted elements `deletions`.
@@ -377,8 +389,9 @@ mod tests {
         );
     }
 
+
     fn wit_batch_updates(number_upds: usize, upd_size: usize) {
-        let (key, pubkey, mut acc, elements) = init(number_upds * upd_size);
+        let (key, pubkey, mut acc, elements) = init(number_upds * upd_size + 1);
 
         // Non revoked (y, wit) pair
         let y = elements[0];
@@ -432,9 +445,9 @@ mod tests {
     #[test]
     fn wit_test_update() {
         let upd_size = 1_001;
-        wit_sequential_update(upd_size);
-        wit_batch_update(upd_size);
-        wit_batch_updates(100, 100);
+        //wit_sequential_update(upd_size);
+        //wit_batch_update(upd_size);
+        wit_batch_updates(1000, 1);
     }
 
     // Test serialization

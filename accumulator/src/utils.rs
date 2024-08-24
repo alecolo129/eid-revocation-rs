@@ -1,4 +1,4 @@
-use std::usize;
+use std::{time::Instant, usize, cmp::max};
 use ark_ff::{One, Zero};
 use bls12_381_plus::{elliptic_curve::hash2curve::ExpandMsgXof, G1Projective, Scalar};
 use digest::{ExtendableOutput, Update, XofReader};
@@ -233,10 +233,10 @@ pub fn window_mul(point: G1Projective, coefficients: Vec<Scalar>)-> Vec<G1Projec
         // Result of the multiplication            
         let mut res = zero;
         window_starts.iter().rev().for_each(|&w_start|{
-            let mut coeff = coeff.clone();
             
             // Extract the `c` bits of the scalar for our current window
             // Shift right to remove LSB, apply modulo 2 to remove MSB
+            let mut coeff = coeff.clone();
             shr_assign(&mut coeff, w_start);
             apply_modulo2(&mut coeff, c);
 
@@ -357,8 +357,6 @@ impl core::ops::MulAssign<Scalar> for PolynomialG1 {
 
 /// Optimized implementation of multi-scalar multiplication adapted from ark-ec library. 
 pub fn msm(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Projective> {
-    println!("Omegas: {:?}\nScalars:{:?}", coeff.len(),scalars.len());
-
     /*
         TODO: consider rewriting library using ark-ec and adopting their implementation of msm. 
     */
@@ -719,17 +717,21 @@ mod tests {
     #[test]
     fn utils_test_msm(){
         
-        let d = 1_000;
+        let d = 1000;
         let mut p = PolynomialG1::with_capacity(d);
+        let mut c =  G1Projective::random(rand_core::OsRng{});
         for i in 0..d{
-            p.0.push(G1Projective::random(rand_core::OsRng{}));
+            p.0.push(c);
+            c=c.double();
         }
+        println!("Finished creating poly");
 
         let x = Scalar::random(rand_core::OsRng{});
         
         let t1 = Instant::now();
         let r1 = p.msm(&x).unwrap();
         let t1 = t1.elapsed();
+        
 
         let inner_p = p.0.clone();
         let p = vec![p];
@@ -744,6 +746,27 @@ mod tests {
 
         assert_eq!(r1, r2);
         
+    }
+
+
+    #[test]
+    fn utils_test_window(){
+        
+        let d = 16_384;
+        let mut point =  G1Projective::random(rand_core::OsRng{});
+
+        let scalars: Vec<Scalar> = (1..=d).map(|i| Scalar::random(rand_core::OsRng{})).collect();
+        
+        let t = Instant::now();
+        let a = window_mul(point, scalars.clone());         
+        println!("Window mul: {:?}", t.elapsed());
+
+        let mut a2 = Vec::with_capacity(scalars.len());
+        let t = Instant::now();
+        scalars.iter().for_each(|s| a2.push(s*point));
+        println!("Trivial: {:?}", t.elapsed());
+
+        assert_eq!(a, a2);
     }
 
     /* 

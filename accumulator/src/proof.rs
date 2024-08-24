@@ -1,7 +1,7 @@
 use crate::{
     accumulator::{Accumulator, Element}, generate_fr, key::PublicKey, witness::MembershipWitness, SALT, Error
 };
-use bls12_381_plus::{G1Affine, G1Projective, G2Projective, Gt, Scalar};
+use bls12_381_plus::{multi_miller_loop, G1Affine, G1Projective, G2Projective, G2Prepared, Gt, Scalar};
 use group::{Curve, Group, GroupEncoding};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
@@ -189,10 +189,14 @@ impl Proof {
         &self,
         params: &ProofParamsPublic,
     ) -> ProofFinal {
-
-        // e(A_bar, X_2) - e(B_bar, g_2) = 0
-        let pair_final = pair(self.a_bar, params.x_2)-pair(self.b_bar, params.g_2);
         
+        
+        // e(A_bar, X_2) - e(B_bar, g_2) = 0
+        let pair_final = multi_miller_loop(&[(&self.a_bar.to_affine(), &G2Prepared::from(params.x_2.to_affine())), (&(-self.b_bar).to_affine(), &G2Prepared::from(params.g_2.to_affine()))]).final_exponentiation();
+        
+        //let pair_final = pair(self.a_bar, params.x_2)-pair(self.b_bar, params.g_2);
+
+
         // Reconstruct U = s*C_m + t*A_bar - c*B_bar
         let u = self.s*params.c_m + self.t*self.a_bar - self.challenge_hash * self.b_bar;
         ProofFinal {
@@ -297,11 +301,12 @@ mod tests {
 
     use std::{convert::TryFrom, time::Instant};
 
+    use rand::RngCore;
+
     use crate::{
         accumulator::Element, proof::Proof, witness::Deletion, Accumulator, MembershipWitness, ProofCommitting, ProofParamsPrivate, ProofParamsPublic, PROOF_LABEL, SecretKey, PublicKey
     };
 
-    
     #[test]
     fn proof_test_fiat_shamir_succeed() {
         // Get public parameters 

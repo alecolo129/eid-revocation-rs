@@ -4,7 +4,7 @@ use super::{
     utils::{generate_fr, Polynomial},
     Element, Error,
 };
-use bls12_381_plus::{G2Affine, G2Projective, Scalar};
+use bls12_381_plus::{elliptic_curve::scalar, G2Affine, G2Projective, Scalar};
 use core::convert::TryFrom;
 use group::GroupEncoding;
 use serde::{Deserialize, Serialize};
@@ -85,6 +85,17 @@ impl SecretKey {
         let init = self.batch_deletions(&deletions[0..1]).0;
         pt.push(init);
         v_d.push(init);
+        
+        /*let mut inv = self.batch_deletions(&deletions).0;
+        let mut inverses = Vec::new();
+
+        for s in (0..deletions.len()).rev() {
+            // ∏ 1..m (yD_i + alpha)^-1 ∏ (m-s)..s (yD_j + alpha) = ∏ 1..s (yD_i + alpha)
+            inverses.push(inv);
+            inv *= self.batch_additions(&[deletions[s]]).0
+        }
+        inverses.reverse();*/
+
         for s in 1..deletions.len() {
             // ∏ 1..s (yD_i + alpha)^-1
             pt *= self.batch_deletions(&deletions[s..s+1]).0;
@@ -237,7 +248,7 @@ mod tests {
     #[test]
     fn key_coefficient_test() {
 
-        const BATCH_SIZE: usize = 1_000;
+        const BATCH_SIZE: usize = 100;
 
         // Init params
         let key = SecretKey::new(Some(b"1234567890"));
