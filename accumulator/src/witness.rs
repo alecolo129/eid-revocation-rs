@@ -2,8 +2,10 @@ use super::{
     aggregate_eval_omega, Accumulator, Coefficient, Element, Error, Polynomial, PolynomialG1,
     PublicKey, SecretKey,
 };
-use bls12_381_plus::{multi_miller_loop, G1Affine, G1Projective, G2Prepared, G2Projective, Scalar};
+//use bls12_381_plus::{multi_miller_loop, G1Affine, G1Projective, G2Prepared, G2Projective, Scalar};
+use blsful::inner_types::*;
 use core::{convert::TryFrom, fmt};
+use std::time::Instant;
 use group::{Curve, Group, GroupEncoding};
 use serde::{Deserialize, Serialize};
 
@@ -107,6 +109,7 @@ impl MembershipWitness {
     ) -> Result<MembershipWitness, Error> {
         // dD(x) = ∏ 1..m (yD_i - x)
         let mut d_d = dd_eval(&vec![deletions], y.0);
+
         let t = d_d.invert();
         // If this fails, then this value was removed
         if bool::from(t.is_none()) {
@@ -444,10 +447,10 @@ mod tests {
     // Test sequential and batch updates
     #[test]
     fn wit_test_update() {
-        let upd_size = 1_001;
+        let upd_size = 10_001;
         //wit_sequential_update(upd_size);
-        //wit_batch_update(upd_size);
-        wit_batch_updates(1000, 1);
+        wit_batch_update(upd_size);
+        //wit_batch_updates(1000, 1);
     }
 
     // Test serialization

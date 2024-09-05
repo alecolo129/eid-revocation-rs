@@ -1,7 +1,8 @@
 use crate::{
     accumulator::{Accumulator, Element}, generate_fr, key::PublicKey, witness::MembershipWitness, SALT, Error
 };
-use bls12_381_plus::{multi_miller_loop, G1Affine, G1Projective, G2Projective, G2Prepared, Gt, Scalar};
+//use bls12_381_plus::{multi_miller_loop, G1Affine, G1Projective, G2Projective, G2Prepared, Gt, Scalar};
+use blsful::inner_types::*;
 use group::{Curve, Group, GroupEncoding};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
@@ -131,7 +132,7 @@ impl ProofCommitting {
         let beta = generate_fr(SALT, None, &mut rng);
 
         // U = alpha*C_m + beta*A_bar
-        let u =  alpha * params_pub.c_m + beta * a_bar;
+        let u =  params_pub.c_m * alpha + a_bar * beta;
         
         Self {
             a_bar,
@@ -198,7 +199,7 @@ impl Proof {
 
 
         // Reconstruct U = s*C_m + t*A_bar - c*B_bar
-        let u = self.s*params.c_m + self.t*self.a_bar - self.challenge_hash * self.b_bar;
+        let u = params.c_m * self.s + self.a_bar * self.t - self.b_bar * self.challenge_hash;
         ProofFinal {
             pair_final: pair_final,
             a_bar: self.a_bar,
@@ -287,12 +288,12 @@ pub fn schnorr(r: Scalar, v: Scalar, challenge: Scalar) -> Scalar {
 
 
 pub fn pair(g1: G1Projective, g2: G2Projective) -> Gt {
-    bls12_381_plus::pairing(&g1.to_affine(), &g2.to_affine())
+    blsful::inner_types::pairing(&g1.to_affine(), &g2.to_affine())
 }
 
 pub fn pairing(g1: G1Projective, g2: G2Projective, exp: Scalar) -> Gt {
     let base = g1 * exp;
-    bls12_381_plus::pairing(&base.to_affine(), &g2.to_affine())
+    blsful::inner_types::pairing(&base.to_affine(), &g2.to_affine())
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@ use super::{
     Error, SecretKey,
 };
 use crate::window_mul;
-use bls12_381_plus::{G1Affine, G1Projective, Scalar};
+use blsful::inner_types::*;
 use core::{
     convert::TryFrom,
     fmt::{self, Formatter},
@@ -274,7 +274,7 @@ impl Accumulator {
 mod tests {
     use std::time::Instant;
 
-    use group::{ff::{Field, PrimeField}, Group};
+    use group::ff::{Field, PrimeField};
     use rand::rngs::OsRng;
     use std::time::SystemTime;
     use crate::{Deletion, MembershipWitness, PublicKey};

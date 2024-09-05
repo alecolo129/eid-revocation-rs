@@ -2,7 +2,7 @@ use accumulator::{
     accumulator::{Accumulator, Element}, key::{PublicKey, SecretKey}, proof::ProofParamsPublic, window_mul, witness::MembershipWitness, Coefficient
 };
 
-use bls12_381_plus::{G1Projective, Scalar};
+use blsful::inner_types::{G1Projective, Scalar};
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap};
 

@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 accumulator = { version = "0.1.0", path = "../accumulator" }
-bls12_381_plus = "0.8.16"
+blsful = "2.5.7"
 merlin = "3.0.0"
 rand_core = "0.6.4"
 serde = "1.0.203"

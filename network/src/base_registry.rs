@@ -7,7 +7,7 @@ use axum::{
     routing::{get, put},
     Router,
 };
-use bls12_381_plus::Scalar;
+use blsful::inner_types::Scalar;
 use entities::issuer::UpdatePolynomials;
 use serde::{Deserialize, Serialize};
 use std::{

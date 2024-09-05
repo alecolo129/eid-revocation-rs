@@ -1,10 +1,12 @@
-use std::{time::Instant, usize, cmp::max};
-use ark_ff::{One, Zero};
-use bls12_381_plus::{elliptic_curve::hash2curve::ExpandMsgXof, G1Projective, Scalar};
+use std::{time::Instant, usize};
+use ark_ff::Zero;
+use blsful::{inner_types::*};
 use digest::{ExtendableOutput, Update, XofReader};
 use group::ff::{Field, PrimeField};
 use rand_core::{CryptoRng, RngCore};
 use sha3::Shake256;
+
+
 
 /// Similar to https://tools.ietf.org/html/draft-irtf-cfrg-bls-signature-04#section-2.3
 /// info is left blank
@@ -113,88 +115,14 @@ impl PolynomialG1 {
         }
 
         // If the poly is small, evaluate directly
-        if *x==Scalar::ONE || self.0.len()<=8{
+        if *x==Scalar::ONE || self.0.len()<=64{
             return self.evaluate(x);
         }
 
         // Compute 1,x,...,x^d
         let scalars = self.compute_powers_for_eval(x);
-        
-        // Get an iterator with coefficients and scalars pairs (c_1, 1), (c_2,x), ..., (c_d, x^d) 
-        let scalars_and_coeff_iter = scalars.iter().zip(self.0.clone());
-        let c = self.get_window_size();
 
-        // Get indexes of msm windows
-        let num_bits = Scalar::BYTES*8 as usize;
-        let window_starts: Vec<_> = (0..num_bits).step_by(c).collect();
-        let zero = G1Projective::IDENTITY;
-        
-        // Each window is of size `c`.
-        // We divide up the bits 0..num_bits into windows of size `c`, and
-        // process each such window.
-        let window_sums: Vec<_> = window_starts.into_iter()
-            .map(|w_start| {
-                let mut res = zero;
-                // We don't need the "zero" bucket, so we only have 2^c - 1 buckets.
-                let mut buckets = vec![zero; (1 << c) - 1];
-                scalars_and_coeff_iter.clone().for_each(|(&scalar, base)| {                    
-
-                    let mut scalar = scalar.clone();
-                    // Extract the `c` bits correspondig to our window:
-                    // Right-shift by w_start to remove the lower bits
-                    shr_assign(&mut scalar, w_start);
-                    // Apply mod 2^{window size} to the result to remove the higher bits
-                    apply_modulo2(&mut scalar, c);
-
-                    // The remaining extracted bits form our index in the bucket
-                    let index = scalar_to_usize(&scalar);
-                    
-                    // If the scalar is non-zero, we update the corresponding
-                    // bucket.
-                    if index != 0 {
-                        buckets[index - 1] += base;
-                    }
-                    
-                });
-
-                // Compute sum_{i in 0..num_buckets} (sum_{j in i..num_buckets} bucket[j])
-                // This is computed below for b buckets, using 2b curve additions.
-                //
-                // We could first normalize `buckets` and then use mixed-addition
-                // here, but that's slower for the kinds of groups we care about
-                // (Short Weierstrass curves and Twisted Edwards curves).
-                // In the case of Short Weierstrass curves,
-                // mixed addition saves ~4 field multiplications per addition.
-                // However normalization (with the inversion batched) takes ~6
-                // field multiplications per element,
-                // hence batch normalization is a slowdown.
-
-                // `running_sum` = sum_{j in i..num_buckets} bucket[j],
-                // where we iterate backward from i = num_buckets to 0.
-                let mut running_sum = G1Projective::IDENTITY;
-                buckets.into_iter().rev().for_each(|b| {
-                    running_sum += &b;
-                    res += &running_sum;
-                });
-                res
-            })
-            .collect();
-
-        // We store the sum for the lowest window.
-        let lowest = *window_sums.first().unwrap();
-        
-        // We're traversing windows from high to low.
-        Some(lowest
-            + &window_sums[1..]
-                .iter()
-                .rev()
-                .fold(zero, |mut total, sum_i| {
-                    total += sum_i;
-                    for _ in 0..c {
-                        total = total.double();
-                    }
-                    total
-                }))
+        return msm(&self.0, &scalars);
     }
 
     pub fn degree(&self)->usize{
@@ -228,7 +156,7 @@ pub fn window_mul(point: G1Projective, coefficients: Vec<Scalar>)-> Vec<G1Projec
     for i in 1..table.len(){
         table[i]=table[i-1]+point;
     }
-
+ 
     coefficients.iter().map(|&coeff| {        
         // Result of the multiplication            
         let mut res = zero;
@@ -389,12 +317,14 @@ pub fn msm(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Project
             let mut res = zero;
             // We don't need the "zero" bucket, so we only have 2^c - 1 buckets.
             let mut buckets = vec![zero; (1 << c) - 1];
-            scalars_and_coeff_iter.clone().for_each(|(&scalar, base)| {                    
-
+            scalars_and_coeff_iter.clone().for_each(|(scalar, base)| {                    
+                
                 let mut scalar = scalar.clone();
+
                 // Extract the `c` bits correspondig to our window:
                 // Right-shift by w_start to remove the lower bits
                 shr_assign(&mut scalar, w_start);
+  
                 // Apply mod 2^{window size} to the result to remove the higher bits
                 apply_modulo2(&mut scalar, c);
 
@@ -408,7 +338,6 @@ pub fn msm(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Project
                 }
                 
             });
-
             let mut running_sum = G1Projective::IDENTITY;
             buckets.into_iter().rev().for_each(|b| {
                 running_sum += &b;
@@ -418,7 +347,7 @@ pub fn msm(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Project
         })
         .collect();
 
-    // We store the sum for the lowest window.
+        // We store the sum for the lowest window.
     let lowest = *window_sums.first().unwrap();
     
     // We're traversing windows from high to low.
@@ -574,7 +503,7 @@ fn aggregate_d(omegas: &Vec<PolynomialG1>, scalars: &Vec<Scalar>, e: Scalar) -> 
 
     // Pre-compute all required powers of the input element
     let mut powers = Vec::<Scalar>::with_capacity(max_deg);
-    powers.push(Scalar::one());
+    powers.push(Scalar::ONE);
     (1..=max_deg).for_each(|i|{powers.push(powers[i-1]*e);});
     
     // Scalar vector
@@ -597,7 +526,7 @@ pub fn aggregate_eval_omega(omegas: Vec<PolynomialG1>, scalars: &Vec<Scalar>, e:
 
     // Pre-compute all required powers of the input element
     let mut powers = Vec::<Scalar>::with_capacity(max_deg);
-    powers.push(Scalar::one());
+    powers.push(Scalar::ONE);
     (1..=max_deg).for_each(|i|{powers.push(powers[i-1]*e);});
     
     // Scalar vector
@@ -633,7 +562,6 @@ mod tests {
         rand_core::OsRng{}.fill_bytes(&mut rhs);
         let mut rhs = usize::from_be_bytes(rhs);
         rhs %= Scalar::BYTES+2;
-        let rhs = 16;
 
         // u128 shr_assign
         let t1 = Instant::now();
@@ -674,7 +602,7 @@ mod tests {
 
         
         let t2 = Instant::now();
-        let res2: Vec<G1Projective> = cs.iter().map(|c| c*v).collect();
+        let res2: Vec<G1Projective> = cs.iter().map(|c| v*c).collect();
         let t2 = t2.elapsed();
         
         for i in (0..size){
@@ -689,7 +617,7 @@ mod tests {
     #[test]
     fn utils_test_eval(){
         
-        let d = 1_000;
+        let d = 1<<8;
         let mut p = PolynomialG1::with_capacity(d);
         for i in 0..d{
             p.0.push(G1Projective::random(rand_core::OsRng{}));
@@ -713,11 +641,40 @@ mod tests {
     }
 
 
+    #[test]
+    fn utils_test_point_add(){
+
+
+        let xs: Vec<G1Projective> = (0..100).map(|_|G1Projective::random(rand_core::OsRng{})).collect();
+        let ys: Vec<G1Projective> = (0..100).map(|_|G1Projective::random(rand_core::OsRng{})).collect();
+        
+        let t1 = Instant::now();
+        xs.iter().enumerate().for_each(|(i,&x)| {x.double();});
+        let t1 = t1.elapsed();
+        
+        println!("100 add: {:?}", t1);
+        
+    }
+
+    #[test]
+    fn utils_test_scalar_mul(){
+
+
+        let xs: Vec<Scalar> = (0..100).map(|_|Scalar::random(rand_core::OsRng{})).collect();
+        let ys: Vec<Scalar> = (0..100).map(|_|Scalar::random(rand_core::OsRng{})).collect();
+        
+        let t1 = Instant::now();
+        xs.iter().enumerate().for_each(|(i,&x)| {x*ys[i];});
+        let t1 = t1.elapsed();
+        
+        println!("100 mul: {:?}", t1);
+        
+    }
 
     #[test]
     fn utils_test_msm(){
         
-        let d = 1000;
+        let d = 1_000;
         let mut p = PolynomialG1::with_capacity(d);
         let mut c =  G1Projective::random(rand_core::OsRng{});
         for i in 0..d{
@@ -763,7 +720,7 @@ mod tests {
 
         let mut a2 = Vec::with_capacity(scalars.len());
         let t = Instant::now();
-        scalars.iter().for_each(|s| a2.push(s*point));
+        scalars.iter().for_each(|s| a2.push(point*s));
         println!("Trivial: {:?}", t.elapsed());
 
         assert_eq!(a, a2);

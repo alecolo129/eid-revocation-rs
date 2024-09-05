@@ -4,7 +4,8 @@ use super::{
     utils::{generate_fr, Polynomial},
     Element, Error,
 };
-use bls12_381_plus::{elliptic_curve::scalar, G2Affine, G2Projective, Scalar};
+//use bls12_381_plus::{elliptic_curve::scalar, G2Affine, G2Projective, Scalar};
+use blsful::inner_types::*;
 use core::convert::TryFrom;
 use group::GroupEncoding;
 use serde::{Deserialize, Serialize};
@@ -227,8 +228,7 @@ impl TryFrom<&[u8; 96]> for PublicKey {
 mod tests {
     use std::time::Instant;
     use super::*;
-    use bls12_381_plus::G1Projective;
-    use group::ff::Field;
+    use blsful::inner_types::G1Projective;
 
     #[test]
     fn key_batch_test() {
@@ -269,7 +269,7 @@ mod tests {
 
         // Check coeffiecients are the same
         coefficients.iter().zip(coefficients2.iter()).for_each(|(&c_1, &c_2)|{
-            assert_eq!(c_1.0, c_2.0.neg());
+            assert_eq!(c_1.0, -c_2.0);
         });
         
 

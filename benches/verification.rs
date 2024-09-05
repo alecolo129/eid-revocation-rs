@@ -2,7 +2,7 @@ use entities::issuer::Issuer;
 use accumulator::{
     Accumulator, Deletion, Element, MembershipWitness, PublicKey, SecretKey
 };
-use bls12_381_plus::Scalar;
+use blsful::inner_types::Scalar;
 use entities::{holder, Holder, Verifier};
 use rand_core::OsRng;
 use serde::{Serialize, Serializer};
@@ -26,7 +26,7 @@ const NUM_SAMPLES: usize = 30; // the number of samples for each benchmark
 
 criterion_group!(name = benches;
     config = Criterion::default().sample_size(NUM_SAMPLES);
-    targets = wit_ver
+    targets = wit_ver, zk_proofs
 );
 criterion_main!(benches);
 

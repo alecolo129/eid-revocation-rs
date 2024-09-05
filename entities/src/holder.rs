@@ -4,7 +4,7 @@ use accumulator::{
 use crate::{issuer::RevocationHandle, UpdatePolynomials};
 use crate::Updatable;
 
-use bls12_381_plus::Scalar;
+use blsful::inner_types::Scalar;
 
 #[derive(Debug)]
 pub struct Holder {
