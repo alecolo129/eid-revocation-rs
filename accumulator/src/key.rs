@@ -4,14 +4,13 @@ use super::{
     utils::{generate_fr, Polynomial},
     Element, Error,
 };
-//use bls12_381_plus::{elliptic_curve::scalar, G2Affine, G2Projective, Scalar};
 use blsful::inner_types::*;
 use core::convert::TryFrom;
 use group::GroupEncoding;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
-/// Represents alpha (secret key) 
+/// Represents x (secret key) 
 #[derive(Clone, Debug, Zeroize, Serialize, Deserialize)]
 #[zeroize(drop)]
 pub struct SecretKey(pub Scalar);
@@ -28,7 +27,7 @@ impl TryFrom<&[u8; 32]> for SecretKey {
 
     fn try_from(bytes: &[u8; 32]) -> Result<Self, Self::Error> {
         let res = Scalar::from_be_bytes(bytes);
-        if res.is_some().unwrap_u8() == 1u8 {
+        if bool::from(res.is_some()) {
             Ok(Self(res.unwrap()))
         } else {
             Err(Error {
@@ -51,65 +50,59 @@ impl SecretKey {
         ))
     }
 
-    /// Takes a list of additions `y_1, ..., y_n` and returns `(y_1+alpha)*...*(y_n+alpha)`
+    /// Takes a list of elements `e_1, ..., e_m` and returns `(e_1+x)*...*(e_m+x)`
     fn batch_additions(&self, additions: &[Element]) -> Element {
         Element(
             additions
                 .iter()
-                .map(|v| v.0+self.0)
-                .fold(Scalar::ONE, |a, y| a*y),
+                .map(|e_i| e_i.0 + self.0)
+                .fold(Scalar::ONE, |a, s_i| a * s_i),
         )
     }
 
-    /// Takes a list `deletions` of elements to delete, and get accumulator multiplier after batch delete
+    /// Takes a list of elements `e_1, ..., e_m` and returns `1/((e_1+x)*...*(e_m+x))`
     pub fn batch_deletions(&self, deletions: &[Element]) -> Element {
-        Element(self.batch_additions(deletions).0.invert().unwrap())
+        Element(self.batch_additions(deletions).0.invert().expect("Inversion error: one of the deleted elements is outside accumulator domain"))
     }
 
-    /// Create the coefficients for the batch update polynomial Omega, 
-    /// as in Section 3 of  <https://eprint.iacr.org/2020/777.pdf>. 
-    pub fn create_coefficients(
+    /// Create the coefficients for the polynomial v(X), as in Section 4.4.2 of my thesis. 
+    /// 
+    /// Returns an empty vector if the list of deletions is empty
+    pub fn gen_up_poly(
         &self,
         deletions: &[Element],
     ) -> Vec<Element> {
 
+        // Return empty poly if no deletion is batched
         if deletions.is_empty(){
             return vec![];
         }
    
         let m1 = -Scalar::ONE;
-        let mut v_d = Polynomial::with_capacity(deletions.len());
+        let mut v = Polynomial::with_capacity(deletions.len());
         let mut pt = Polynomial::with_capacity(deletions.len()-1);
         
-        // vD(x) = ∑^{m}_{s=1}{ ∏ 1..s {yD_i + alpha}^-1 ∏ 1 ..s-1 {yD_j - x}
-        // Initialize both poly with first value (yD_1+alpha)^-1
+        // v(X) = ∑^{m}_{s=1}{ ∏^{s}_{i=1} {e_i + x}^-1 ∏^{s-1}_{j=1} {e_j - X}
+        
+        // Initialize both poly with first value (e_1+x)^-1
         let init = self.batch_deletions(&deletions[0..1]).0;
         pt.push(init);
-        v_d.push(init);
+        v.push(init);
         
-        /*let mut inv = self.batch_deletions(&deletions).0;
-        let mut inverses = Vec::new();
-
-        for s in (0..deletions.len()).rev() {
-            // ∏ 1..m (yD_i + alpha)^-1 ∏ (m-s)..s (yD_j + alpha) = ∏ 1..s (yD_i + alpha)
-            inverses.push(inv);
-            inv *= self.batch_additions(&[deletions[s]]).0
-        }
-        inverses.reverse();*/
-
         for s in 1..deletions.len() {
-            // ∏ 1..s (yD_i + alpha)^-1
+            // ∏ i=1..s {e_i + x}^-1
             pt *= self.batch_deletions(&deletions[s..s+1]).0;
 
-            // ∏ 1..(s-1) (yD_j - x)
+            // ∏ j=1...s-1 {e_j - X}
             pt *= &[deletions[s-1].0, m1];
-            v_d += pt.clone();
+            v += pt.clone();
         }
-        v_d.0.iter().map(|b| Element(*b)).collect()
+        v.0.into_iter().map(|b| Element(b)).collect()
     }
 
-    /// Create the Batch Polynomial coefficients
-    pub fn _create_coefficients(
+
+    /// Create the Batch Polynomial coefficients as by Mike Lodder's implementation
+    fn _create_coefficients(
         &self,
         additions: &[Element],
         deletions: &[Element],
@@ -167,8 +160,7 @@ impl SecretKey {
 
 
 
-/// Represents \overline{Q} = \overline{P}*\alpha (public key) on page 6 in
-/// <https://eprint.iacr.org/2020/777.pdf>
+/// Represents X = x*G_2 (public key) defined in page 25 of my thesis
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PublicKey(pub G2Projective);
 
@@ -212,7 +204,7 @@ impl TryFrom<&[u8; 96]> for PublicKey {
 
     fn try_from(bytes: &[u8; 96]) -> Result<Self, Self::Error> {
         let res = G2Affine::from_compressed(bytes).map(G2Projective::from);
-        if res.is_some().unwrap_u8() == 1u8 {
+        if bool::from(res.is_some()){
             Ok(Self(res.unwrap()))
         } else {
             Err(Error {
@@ -236,13 +228,25 @@ mod tests {
         let key = SecretKey::new(None);
         let data = vec![Element::hash(b"value1"), Element::hash(b"value2")];
     
-        // Compute (y_1+alpha)*(y_2+alpha), ((y_1+alpha)*(y_2+alpha))^-1
+        // Compute (e_1+x)*(e_2+x), ((e_1+x)*(e_2+x))^-1
         let add = key.batch_additions(data.as_slice());
         let del = key.batch_deletions(data.as_slice());
         
         // Check del is inverse of add
         let res = add.0*del.0;
         assert_eq!(res, Scalar::ONE);
+    }
+
+    #[test] 
+    #[should_panic]
+    fn key_invalid_batch_test() {
+
+        // Init parameters
+        let key = SecretKey::new(None);
+        let data = vec![Element(-key.0), Element::hash(b"value2")];
+    
+        // Compute ((-x+x)*(e_2+x))^-1
+        let del = key.batch_deletions(data.as_slice());
     }
 
     #[test]
@@ -264,7 +268,7 @@ mod tests {
 
         // Compute update coefficients without optimization
         let t2 = Instant::now();
-        let coefficients2 = key.create_coefficients(&data);
+        let coefficients2 = key.gen_up_poly(&data);
         let t2 = t2.elapsed();
 
         // Check coeffiecients are the same
@@ -274,7 +278,7 @@ mod tests {
         
 
         println!("Old coefficient generation: {:?}", t1);
-        println!("Optimized coefficient generation: {:?}", t2);
+        println!("New coefficient generation: {:?}", t2);
     }
 
     
