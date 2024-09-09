@@ -1,21 +1,19 @@
 use super::{
-    aggregate_eval_omega, Accumulator, Coefficient, Element, Error, Polynomial, PolynomialG1,
-    PublicKey, SecretKey,
+    aggregate_eval_omega, Accumulator, Coefficient, Element, Error, PolynomialG1, PublicKey,
+    SecretKey,
 };
-//use bls12_381_plus::{multi_miller_loop, G1Affine, G1Projective, G2Prepared, G2Projective, Scalar};
+
 use blsful::inner_types::*;
 use core::{convert::TryFrom, fmt};
-use std::time::Instant;
 use group::{Curve, Group, GroupEncoding};
 use serde::{Deserialize, Serialize};
 
-// Groups the new accumulator value and the deleted element after
+// Groups the deleted element and new accumulator value
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Deletion(pub Accumulator, pub Element);
+pub struct UpMsg(pub Accumulator, pub Element);
 
-/// A membership witness that can be used for membership proof generation
-/// as described in section 4 in
-/// <https://eprint.iacr.org/2020/777>
+/// A membership witness that can be used for membership proof generation,
+/// as described in Section 4 in my thesis
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MembershipWitness(pub G1Projective);
 
@@ -56,67 +54,82 @@ impl TryFrom<&[u8; 48]> for MembershipWitness {
 impl MembershipWitness {
     const BYTES: usize = 80;
 
-    /// Compute the witness using a prehashed element
+    /// Compute the witness associated to a prehashed `value`, for the input `accumulator` and respective `secret_key`
     pub fn new(value: &Element, accumulator: Accumulator, secret_key: &SecretKey) -> Self {
         Self(accumulator.remove(secret_key, *value).0)
     }
 
-    /// Membership witness update as defined in section 3 of <https://eprint.iacr.org/2022/1362>.
-    /// Return a new witness
-    pub fn update(&self, y: Element, del: &[Deletion]) -> Self {
+    /// Takes as input the associated element `e`, and a list of update messages `updates`.
+    /// Sequentially applies the single witness update algorithm.
+    /// 
+    /// Returns a new up-to-date witness if e was not revoked, an invalid witness otherwise
+    pub fn update(&self, e: Element, updates: &[UpMsg]) -> Self {
         let mut clone = *self;
-        clone.update_assign(y, del);
+        clone.update_assign(e, updates);
         clone
     }
 
-    /// Perform in place witness update as defined in section 3 of <https://eprint.iacr.org/2022/1362>
-    pub fn update_assign(&mut self, y: Element, del: &[Deletion]) {
-        // C' = 1/(y' - y) (C - V')
-        for d in del {
-            let mut inv = d.1 .0 - y.0;
-            // If this fails, then this value was removed
+    /// Takes as input the associated element `e`, and a list of update messages `del`.
+    /// Sequentially applies the single witness update algorithm.
+    /// 
+    /// Updates the witness if `e` was not revoked, otherwise returns an invalid witness.
+    pub fn update_assign(&mut self, e: Element, updates: &[UpMsg]) {
+        // Membership witness single update algorithm as defined in page 25 (Figure 4.1) of my thesis.
+        
+        // A_{t+1} = 1/(e_t - e) (A_t - V_{t+1})
+        for msg in updates {
+            // e_t = msg.1.0
+            let mut inv = msg.1.0 - e.0;
+
+            // If this fails, then `e` was removed
             let t = inv.invert();
             if bool::from(t.is_none()) {
                 return;
             }
             inv = t.unwrap();
-            self.0 -= d.0 .0;
+
+            // V_{t+1} = msg.0.0
+            self.0 -= msg.0.0;
             self.0 *= inv;
         }
     }
 
-    /// Perform batch update using the associated element `y`, the list of coefficients `omega`,
+    /// Perform batch update using the associated element `e`, the list of coefficients `omega`,
     /// and list of deleted elements `deletions`.
     ///
-    /// Returns a new updated instance of `MembershipWitness`.
+    /// Returns a new updated instance of `MembershipWitness` or `Error`.
     pub fn batch_update(
         &self,
-        y: Element,
+        e: Element,
         deletions: &[Element],
         omega: &[Coefficient],
     ) -> Result<MembershipWitness, Error> {
-        return self.clone().batch_update_assign(y, deletions, omega);
+        return self.clone().batch_update_assign(e, deletions, omega);
     }
 
     /// Perform batch update of the witness in-place
-    /// using the associated element `y`, the list of coefficients `omega`,
+    /// using the associated element `e`, the list of coefficients `omega`,
     /// and list of deleted elements `deletions`.
+    /// 
+    /// Returns a new updated instance of `MembershipWitness` or `Error`
     pub fn batch_update_assign(
         &mut self,
-        y: Element,
+        e: Element,
         deletions: &[Element],
         omega: &[Coefficient],
     ) -> Result<MembershipWitness, Error> {
-        // dD(x) = ∏ 1..m (yD_i - x)
-        let mut d_d = dd_eval(&vec![deletions], y.0);
+        // d(e) = ∏ 1..m (e_i - e)
+        let mut d_e = dd_eval(&vec![deletions], e.0);
 
-        let t = d_d.invert();
+        let t = d_e.invert();
+        
         // If this fails, then this value was removed
         if bool::from(t.is_none()) {
             return Err(Error::from_msg(1, "no inverse exists"));
         }
-        d_d = t.unwrap();
+        d_e = t.unwrap();
 
+        // Build polynomial from coefficient list
         let poly = PolynomialG1(
             omega
                 .as_ref()
@@ -125,11 +138,11 @@ impl MembershipWitness {
                 .collect::<Vec<G1Projective>>(),
         );
 
-        // Compute〈Υy,Ω〉using Multi Scalar Multiplication
-        if let Some(v) = poly.msm(&y.0) {
-            // C' = 1 / dD * (C -〈Υy,Ω))
+        // Compute Ω(e) using Pippenger's approach for Multi Scalar Multiplication
+        if let Some(v) = poly.msm(&e.0) {
+            // A_{t+1} = 1/d(e) * (A - Ω(e))
             self.0 -= v;
-            self.0 *= d_d;
+            self.0 *= d_e;
             Ok(*self)
         } else {
             Err(Error::from_msg(2, "polynomial could not be evaluated"))
@@ -137,52 +150,57 @@ impl MembershipWitness {
     }
 
     /// Perform batch updates of the witness aggregating the list of coefficients `omegas`
-    /// and using the associated element `y`,
+    /// and using the associated element `e`,
     /// and list of deleted elements `deletions`.
-    pub fn batch_updates(
+    /// 
+    /// Returns a new updated instance of `MembershipWitness` or `Error`
+    pub fn batch_update_aggr(
         &mut self,
-        y: Element,
+        e: Element,
         deletions: &Vec<&[Element]>,
         omegas: Vec<&[Coefficient]>,
     ) -> Result<MembershipWitness, Error> {
-        return self.clone().batch_updates_assign(y, deletions, omegas);
+        return self.clone().batch_update_aggr_assign(e, deletions, omegas);
     }
-    
+
     /// Perform batch updates of the witness in-place aggregating the list of coefficients `omegas`
-    /// and using the associated element `y`,
+    /// and using the associated element `e`,
     /// and list of deleted elements `deletions`.
-    pub fn batch_updates_assign(
+    /// 
+    /// Returns a new updated instance of `MembershipWitness` or `Error`
+    pub fn batch_update_aggr_assign(
         &mut self,
-        y: Element,
+        e: Element,
         deletions: &Vec<&[Element]>,
         omegas: Vec<&[Coefficient]>,
     ) -> Result<MembershipWitness, Error> {
-        let mut coeff = Vec::new();
-        omegas.into_iter().for_each(|omega| {
-            coeff.push(PolynomialG1(
-                omega
-                    .into_iter()
-                    .map(|&coeff| coeff.into())
-                    .collect::<Vec<G1Projective>>(),
-            ));
-        });
+        
+        // Build update polynomials using omega coefficients
+        let coeff = omegas.into_iter().map(|omega| {
+            PolynomialG1(omega
+                .into_iter()
+                .map(|&coeff| coeff.into())
+                .collect::<Vec<G1Projective>>()
+            )
+        }).collect::<Vec<PolynomialG1>>();
 
-        // scalars = [1, dD1(y), dD2(y)*dD1(y), ..., dDm-1(y)*...*dD1(y)]
-        let scalars = dd_evals(deletions, y.0);
+        // Compute evaluations a_{t+1},...,a_{t+n} as in page 39 of my thesis
+        let scalars = dd_evals(deletions, e.0);
 
-        // dD(x) = ∏ 1..m (yD_i - x) = scalars[m-1]*dDm-1(y)
-        let mut d_d: Scalar =
-            scalars.last().unwrap() * dd_eval(&vec![deletions.last().unwrap()], y.0);
+        // d_{t -> t+n}(e) = ∏^{t+m}_{i=t+1} d_i(e) = d_{t+1}(e) * a_{t+n}
+        let mut d_d: Scalar = scalars.last().unwrap() * dd_eval(&vec![deletions.last().unwrap()], e.0);
         let t = d_d.invert();
-        // If this fails, then this value was removed
+        
+        
+        // If this fails, then 'e' was removed
         if bool::from(t.is_none()) {
             return Err(Error::from_msg(1, "no inverse exists"));
         }
         d_d = t.unwrap();
 
-        // Compute〈Υy,Ω〉using Multi Scalar Multiplication
-        if let Some(v) = aggregate_eval_omega(coeff, &scalars, y.0) {
-            // C' = 1 / dD * (C -〈Υy,Ω))
+        // Compute aggragated evaluation Ω_{t->t+n}(e) using Multi Scalar Multiplication
+        if let Some(v) = aggregate_eval_omega(coeff, &scalars, e.0) {
+            // A_{t+n} = 1 / d_{t->t+n}(e) * (A_t - Ω_{t->t+n}(e))
             self.0 -= v;
             self.0 *= d_d;
             Ok(*self)
@@ -196,20 +214,20 @@ impl MembershipWitness {
         self.0 = new_wit;
     }
 
-    /// Verify this is a valid witness for element `y`, public key `pubkey`, and accumulator value `accumulator`.
+    /// Directly verify that this is a valid witness for element `e`, public key `pubkey`, and accumulator value `accumulator`.
     pub fn verify(&self, y: Element, pubkey: PublicKey, accumulator: Accumulator) -> bool {
         let mut p = G2Projective::GENERATOR;
         p *= y.0;
         p += pubkey.0;
         let g2 = G2Projective::GENERATOR;
 
-        // Notation as per section 2 in <https://eprint.iacr.org/2020/777>
-        // e(C, yP~ + Q~) == e(V, P~) <=>  e(C, yP~ + Q~) - e(V, P~) == 0_{G_t}
+   
+        // e(A_t, eG_2 + X) == e(V_t, G_2) <=>  e(A_t, eG_2 + X) - e(V_t, G_2) == 0_{G_t}
         bool::from(
             multi_miller_loop(&[
-                // e(C, yP~ + Q~)
+                // e(A_t, eG_2 + X)
                 (&self.0.to_affine(), &G2Prepared::from(p.to_affine())),
-                // -e(V, P~)
+                // e(V_t, G_2)
                 (
                     &accumulator.0.to_affine(),
                     &G2Prepared::from(-g2.to_affine()),
@@ -227,7 +245,7 @@ impl MembershipWitness {
         res
     }
 
-    /// Old unoptimized version, just for testing
+    /// Old unoptimized version from ALLOSAUR implementation, just for testing
     fn _batch_update_assign(
         &mut self,
         y: Element,
@@ -264,25 +282,31 @@ impl MembershipWitness {
     }
 }
 
-/// Evaluates poly d(y) = ∏ 1..m (d_i - y)
-fn dd_eval(values: &Vec<&[Element]>, y: Scalar) -> Scalar {
+/// Evaluates poly d(e) = ∏ 1..m (e_i - e)
+fn dd_eval(values: &Vec<&[Element]>, e: Scalar) -> Scalar {
     values
         .iter()
         .map(|value| {
             value
                 .iter()
-                .map(|v| v.0 - y)
-                .fold(Scalar::ONE, |a, y| a * y)
+                .map(|e_i| e_i.0 - e)
+                .fold(Scalar::ONE, |s_i, e| s_i * e)
         })
         .product()
 }
 
-/// Creates list of coefficients for aggregating multiple update polynomials.
-/// Uses the list of deletions [d_(1,1),...,d_(n,m)] and the element y to compute [1, d_1(y), d_1(y)*d_2(y),...,d_1(y)*...*d_m-1(y)].
-fn dd_evals(values: &Vec<&[Element]>, y: Scalar) -> Vec<Scalar> {
-    let mut res = vec![Scalar::ONE];
-    values[0..values.len() - 1].iter().for_each(|&value| {
-        res.push(res.last().unwrap() * dd_eval(&vec![value], y));
+/// Creates list of evaluations for aggregating multiple update polynomials.
+/// 
+/// Uses the list of batch deletions `batch_dels`, and the element `e`
+/// to compute the list of evaluatations `a_{t+1},...,a_{t+n}` as by page 39 of my thesis.
+fn dd_evals(batch_dels: &Vec<&[Element]>, e: Scalar) -> Vec<Scalar> {
+    
+    let mut res = Vec::with_capacity(batch_dels.len());
+
+    //`[1, d_{t+2}(e), d_{t+2}(e)*d_{t+3}(e),...,∏^{t+n}_{i=t+2} d_i(e)]`
+    res.push(Scalar::ONE);
+    batch_dels[0..batch_dels.len() - 1].iter().for_each(|&value| {
+        res.push(res.last().unwrap() * dd_eval(&vec![value], e));
     });
     res
 }
@@ -294,7 +318,6 @@ mod tests {
 
     use super::*;
     use crate::key;
-    use std::borrow::Borrow;
     use std::time::Duration;
     use std::time::Instant;
     use std::time::SystemTime;
@@ -322,14 +345,16 @@ mod tests {
         let mut wit_d = MembershipWitness::new(&elem_d, acc, &key);
 
         // Revoke everyone except for elem
-        let dels = &elements[1..upd_size];
-        let mut deletions: Vec<Deletion> = Vec::new();
+        let dels = &elements[1..];
+        let mut deletions: Vec<UpMsg> = Vec::new();
         dels.iter().for_each(|&d| {
+            // Modify accumulator
             acc.remove_assign(&key, d);
-            deletions.push(Deletion { 0: acc, 1: d });
+            // Create update message
+            deletions.push(UpMsg{ 0: acc, 1: d });
         });
 
-        // Update non-revoked element
+        // Update non-revoked element sequentially applying single update algorithm
         let t = Instant::now();
         wit.update_assign(elem, &deletions.as_slice());
         let t = t.elapsed();
@@ -348,7 +373,7 @@ mod tests {
     }
 
     fn wit_batch_update(upd_size: usize) {
-        let (key, pubkey, mut acc, elements) = init(upd_size);
+        let (key, pubkey, mut acc, elements) = init(upd_size+1);
 
         // Non revoked (y, wit) pair
         let y = elements[0];
@@ -374,7 +399,7 @@ mod tests {
         let t2 = t2.elapsed();
 
         // Try updating revoked element
-        wit_d.batch_update_assign(y_d, deletions, &coefficients);
+        assert!(wit_d.batch_update_assign(y_d, deletions, &coefficients).is_err());
 
         // Check (non)revocation of updated witness
         assert!(!wit_d.verify(y_d, pubkey, acc));
@@ -392,18 +417,18 @@ mod tests {
         );
     }
 
+    fn wit_batch_updates(number_upds: usize, batch_size: usize) {
+        let (key, pubkey, mut acc, elements) = init(number_upds * batch_size + 1);
 
-    fn wit_batch_updates(number_upds: usize, upd_size: usize) {
-        let (key, pubkey, mut acc, elements) = init(number_upds * upd_size + 1);
+        // Non revoked (e, wit) pair
+        let e = elements[0];
+        let mut wit = MembershipWitness::new(&e, acc, &key);
 
-        // Non revoked (y, wit) pair
-        let y = elements[0];
-        let mut wit = MembershipWitness::new(&y, acc, &key);
+        // Revoke e_1, ..., e_{upd_size} and compute coefficients for batch update
+        let deletions: Vec<&[Element]> = elements[1..].chunks(batch_size).collect();
 
-        // Revoke y_1, ..., y_(upd_size-1) and compute coefficients for batch update
-        let deletions: Vec<&[Element]> = elements[1..].chunks(upd_size).collect();
+        // Compute update coefficients
         let mut coefficients = Vec::new();
-
         for i in (0..number_upds) {
             coefficients.push(acc.update_assign(&key, &deletions[i]));
         }
@@ -412,8 +437,8 @@ mod tests {
         let mut wit2 = wit.clone();
 
         let t1 = Instant::now();
-        wit.batch_updates_assign(
-            y,
+        wit.batch_update_aggr_assign(
+            e,
             &deletions,
             coefficients.iter().map(|v| v.as_slice()).collect(),
         )
@@ -423,7 +448,7 @@ mod tests {
         let mut t2 = Duration::from_micros(0);
         for i in 0..deletions.len() {
             let t = Instant::now();
-            wit2.batch_update_assign(y, deletions[i], coefficients[i].as_slice())
+            wit2.batch_update_assign(e, deletions[i], coefficients[i].as_slice())
                 .expect("Error when evaluating poly");
             t2 += t.elapsed();
         }
@@ -440,17 +465,19 @@ mod tests {
         );
 
         // Check (non)revocation of updated witness
-        assert!(wit2.verify(y, pubkey, acc));
-        assert!(wit.verify(y, pubkey, acc));
+        assert!(wit2.verify(e, pubkey, acc));
+        assert!(wit.verify(e, pubkey, acc));
     }
 
     // Test sequential and batch updates
     #[test]
     fn wit_test_update() {
-        let upd_size = 10_001;
-        //wit_sequential_update(upd_size);
+        let upd_size = 10_000;
+        wit_sequential_update(upd_size);
         wit_batch_update(upd_size);
-        //wit_batch_updates(1000, 1);
+        
+        let batch_size = 1;
+        wit_batch_updates(upd_size, batch_size);
     }
 
     // Test serialization
