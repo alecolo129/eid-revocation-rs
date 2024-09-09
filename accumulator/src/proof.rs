@@ -1,7 +1,6 @@
 use crate::{
     accumulator::{Accumulator, Element}, generate_fr, key::PublicKey, witness::MembershipWitness, SALT, Error
 };
-//use bls12_381_plus::{multi_miller_loop, G1Affine, G1Projective, G2Projective, G2Prepared, Gt, Scalar};
 use blsful::inner_types::*;
 use group::{Curve, Group, GroupEncoding};
 use serde::{Deserialize, Serialize};
@@ -10,14 +9,11 @@ use core::fmt::{self, Formatter};
 use merlin::Transcript;
 
 /* 
-Use the efficient BBS+ zero-knowledge proof described in section 5.2 of <https://link.springer.com/chapter/10.1007/978-3-031-30589-4_24>
-which proofs e(A,e*g_2+X_2) = e(C(m), g_2). By doing the following substitutions:
-    A => C, 
-    e => y, 
-    g_2 => P~,
-    C(m) <-> V, 
-    X_2 => Q~
-this is equivalent to e(C, yP~ + Q~) = e(V, P~), as per Section 2 in <https://eprint.iacr.org/2020/777>.
+Use the efficient BBS full disclosure proof described in section 5.2 of <https://link.springer.com/chapter/10.1007/978-3-031-30589-4_24>
+which proofs e(A, e*G_2+X_2) = e(C(m), G_2). By doing the following substitutions:
+    A <=> A_t, 
+    C(m) <=> V_t, 
+this is equivalent to e(A_t, e*G_2 + X_2) = e(V_t, G_2) as showed in Page 30 of my thesis.
 */
 
 pub const PROOF_LABEL: &[u8;16] = b"Membership Proof";
@@ -49,8 +45,8 @@ impl ProofParamsPublic {
 
     // Build new Proof params from accumulator and public key
     pub fn new(acc: &Accumulator, public_key: &PublicKey) -> Self {
-        //C_m = V and X_2 = Q~
         Self {
+            //C_m = V_t
             c_m: acc.0,
             g_1: G1Projective::GENERATOR,
             x_2: public_key.0,
@@ -93,9 +89,9 @@ pub struct ProofParamsPrivate{
 impl ProofParamsPrivate {
     pub const BYTES: usize = 80;
 
-    pub fn new(y: Element, mw: &MembershipWitness) -> Self {
-        //a = C and y=e
-        Self{a: mw.0, e: y.0}
+    pub fn new(e: Element, mw: &MembershipWitness) -> Self {
+        //a = A_t
+        Self{a: mw.0, e: e.0}
     }
 
 }
@@ -305,7 +301,7 @@ mod tests {
     use rand::RngCore;
 
     use crate::{
-        accumulator::Element, proof::Proof, witness::Deletion, Accumulator, MembershipWitness, ProofCommitting, ProofParamsPrivate, ProofParamsPublic, PROOF_LABEL, SecretKey, PublicKey
+        accumulator::Element, proof::Proof, witness::UpMsg, Accumulator, MembershipWitness, ProofCommitting, ProofParamsPrivate, ProofParamsPublic, PROOF_LABEL, SecretKey, PublicKey
     };
 
     #[test]
