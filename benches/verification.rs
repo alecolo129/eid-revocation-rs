@@ -1,14 +1,9 @@
 use entities::issuer::Issuer;
 use accumulator::{
-    Accumulator, Deletion, Element, MembershipWitness, PublicKey, SecretKey
+    Accumulator, Element, MembershipWitness, PublicKey, SecretKey
 };
-use blsful::inner_types::Scalar;
-use entities::{holder, Holder, Verifier};
-use rand_core::OsRng;
-use serde::{Serialize, Serializer};
-use core::num;
-use std::collections::{hash_map, HashMap, HashSet};
-use std::mem::{size_of, size_of_val};
+use entities::{Holder, Verifier};
+use std::mem::size_of_val;
 use std::vec::Vec;
 use criterion::{
     criterion_group, criterion_main, Criterion,

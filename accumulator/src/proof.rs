@@ -296,18 +296,15 @@ pub fn pairing(g1: G1Projective, g2: G2Projective, exp: Scalar) -> Gt {
 mod tests {
 
 
-    use std::{convert::TryFrom, time::Instant};
-
-    use rand::RngCore;
-
+    use std::time::Instant;
     use crate::{
-        accumulator::Element, proof::Proof, witness::UpMsg, Accumulator, MembershipWitness, ProofCommitting, ProofParamsPrivate, ProofParamsPublic, PROOF_LABEL, SecretKey, PublicKey
+        accumulator::Element, proof::Proof, Accumulator, MembershipWitness, ProofCommitting, ProofParamsPrivate, ProofParamsPublic, PROOF_LABEL, SecretKey, PublicKey
     };
 
     #[test]
     fn proof_test_fiat_shamir_succeed() {
         // Get public parameters 
-        let (mut acc, key) = (Accumulator::random(rand_core::OsRng{}), SecretKey::new(None));
+        let (acc, key) = (Accumulator::random(rand_core::OsRng{}), SecretKey::new(None));
         let pub_key = PublicKey::from(&key);       
         let params_pub = ProofParamsPublic::new(&acc, &pub_key);
         
@@ -386,7 +383,7 @@ mod tests {
     #[test]
     fn proof_test_serialize(){
         // Get public parameters 
-        let (mut acc, key) = (Accumulator::random(rand_core::OsRng{}), SecretKey::new(None));
+        let (acc, key) = (Accumulator::random(rand_core::OsRng{}), SecretKey::new(None));
         let pub_key = PublicKey::from(&key);       
         let params_pub = ProofParamsPublic::new(&acc, &pub_key);
          

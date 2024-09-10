@@ -1,5 +1,5 @@
 use accumulator::{
-    accumulator::Element, proof::{self, Proof, ProofParamsPublic, PROOF_LABEL}, witness::{Deletion, MembershipWitness}, Accumulator, Error, ProofParamsPrivate
+    accumulator::Element, proof::{self, Proof, ProofParamsPublic, PROOF_LABEL}, witness::{UpMsg, MembershipWitness}, Accumulator, Error, ProofParamsPrivate
 };
 use crate::{issuer::RevocationHandle, UpdatePolynomials};
 use crate::Updatable;
@@ -24,7 +24,7 @@ impl Holder {
     }
 
     /// Sequentially updates the witness using the vector of deletions `rh`.
-    pub fn update(&mut self, del: &[Deletion]){
+    pub fn update(&mut self, del: &[UpMsg]){
         self.w.update_assign(self.y, del);
     }
 

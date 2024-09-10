@@ -1,8 +1,8 @@
 use entities::issuer::Issuer;
 use accumulator::{
-    Accumulator, Deletion, Element, MembershipWitness, PublicKey, SecretKey
+    Accumulator, UpMsg, Element, MembershipWitness, PublicKey, SecretKey
 };
-use blsful::inner_types::{Field, Scalar};
+use blsful::inner_types::Scalar;
 use std::vec::Vec;
 use criterion::{
     criterion_group, criterion_main, Criterion,
@@ -14,27 +14,19 @@ use criterion::{
 //-------BENCHMARK PARAMETERS ------//
 
 const USERS: usize =  280_001; // Total number of elements originally added
-
-
 const UPDATES: [usize; 10] = [10_000, 20_000, 30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000, 100_000];
-//const CLIENT_UPDATES: [usize; 5] = [1, 10, 20, 30, 40];
-const CLIENT_UPDATES: usize = 20_000;
-const BATCH_CLIENT_UPDATES: [usize; 101] = [1, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600, 2800, 3000, 3200, 3400, 3600, 3800, 4000, 4200, 4400, 4600, 4800, 5000, 5200, 5400, 5600, 5800, 6000, 6200, 6400, 6600, 6800, 7000, 7200, 7400, 7600, 7800, 8000, 8200, 8400, 8600, 8800, 9000, 9200, 9400, 9600, 9800, 10000, 10200, 10400, 10600, 10800, 11000, 11200, 11400, 11600, 11800, 12000, 12200, 12400, 12600, 12800, 13000, 13200, 13400, 13600, 13800, 14000, 14200, 14400, 14600, 14800, 15000, 15200, 15400, 15600, 15800, 16000, 16200, 16400, 16600, 16800, 17000, 17200, 17400, 17600, 17800, 18000, 18200, 18400, 18600, 18800, 19000, 19200, 19400, 19600, 19800, 20000];
 const NUM_SAMPLES: usize = 30; // the number of samples for each benchmark
 
 
 
 criterion_group!(name = benches;
     config = Criterion::default().sample_size(NUM_SAMPLES);
-    //targets = issuer_gen, issuer_add, issuer_del
-    //targets = client_upd_single
-    targets = client_upd_sequential
+    targets = issuer_gen, issuer_update, issuer_add, issuer_del, client_upd_single, client_upd_sequential, batch_update, batch_update_aggr
 );
 criterion_main!(benches);
 
 
 
-// Benchmarks the single-server update of Section 3
 fn issuer_gen(c: &mut Criterion) {
     c.benchmark_group("issuer_core");
         
@@ -51,7 +43,6 @@ fn issuer_gen(c: &mut Criterion) {
         });   
 }
 
-// Benchmarks the single-server update of Section 3
 fn issuer_add(c: &mut Criterion) {
     c.benchmark_group("issuer_core");
         println!("=================================================");
@@ -69,7 +60,7 @@ fn issuer_add(c: &mut Criterion) {
         });   
 }
 
-// Benchmarks the single-server update of Section 3
+
 fn issuer_del(c: &mut Criterion) {
     c.benchmark_group("issuer_core");
         println!("=================================================");
@@ -88,7 +79,6 @@ fn issuer_del(c: &mut Criterion) {
 }
 
 
-// Benchmarks the single-server update of Section 3
 fn client_upd_single(c: &mut Criterion) {
     c.benchmark_group("client_core");
         println!("=================================================");
@@ -103,7 +93,7 @@ fn client_upd_single(c: &mut Criterion) {
         let mut wit = MembershipWitness::new(&el, acc, &sk);
         let new_acc = acc.remove(&sk, deleted_el);
     
-        let del = Deletion(new_acc, deleted_el);
+        let del = UpMsg(new_acc, deleted_el);
         c.bench_function("Upd", |b| {
             b.iter(|| {
                 wit.update_assign(el, &[del])
@@ -112,7 +102,6 @@ fn client_upd_single(c: &mut Criterion) {
 }
 
 
-// Benchmarks the single-server update of Section 3
 fn client_upd_sequential(c: &mut Criterion) {
     c.benchmark_group("client_core");
         println!("=================================================");
@@ -121,11 +110,9 @@ fn client_upd_sequential(c: &mut Criterion) {
         );
         println!("=================================================");
         
-        //let mut upds: Vec<usize> = (0..=CLIENT_UPDATES).step_by(200).collect();
         let upds: Vec<usize> = (0..16).map(|i| 1<<i).step_by(2).collect();
-        //upds[0] = 1;
 
-        for upd in [5_000]{
+        for upd in upds{
             println!("=================================================");
             println!(
                 "Running with {} deletions", upd
@@ -138,18 +125,18 @@ fn client_upd_sequential(c: &mut Criterion) {
 
             // Takes the last user, gives them a witness
             let y = items.last().unwrap().clone();
-            let mut witness = MembershipWitness::new(&y, acc, &sk);
+            let witness = MembershipWitness::new(&y, acc, &sk);
 
 
             // Creates lists of elements delete
             let (deletions, _) = items.split_at(upd);
-            let mut dels: Vec<Deletion> = Vec::new();
+            let mut dels: Vec<UpMsg> = Vec::new();
             let mut acc_t = acc.clone();
 
             let t = std::time::Instant::now();
             for &d in deletions{
                 let new_acc = acc_t.remove_assign(&sk, d);
-                dels.push(Deletion(new_acc, d));
+                dels.push(UpMsg(new_acc, d));
             }
             println!("del: {:?}", t.elapsed());
             
@@ -162,32 +149,7 @@ fn client_upd_sequential(c: &mut Criterion) {
         }
 }
 
-// Benchmarks the single-server update of Section 3
-fn wit_ver(c: &mut Criterion) {
-    c.benchmark_group("client_core");
-        println!("=================================================");
-        println!(
-            "=Verify Witness Benchmark"
-        );
-        println!("=================================================");
 
-        let acc = Accumulator::random(rand_core::OsRng{});
-        let sk = SecretKey::new(None);
-        let pk = PublicKey::from(&sk);
-        let el =  Element::random();
-        let wit = MembershipWitness::new(&el, acc, &sk);
-        
-        c.bench_function("WitVer", |b| {
-            b.iter(|| {
-                wit.verify(el, pk, acc);
-            })
-        });   
-
-        println!("{}", wit.verify(el, pk, acc));
-}
-
-
-// Benchmarks the single-server update of Section 3
 fn issuer_update(c: &mut Criterion) {
     c.benchmark_group("issuer_update");
 
@@ -208,9 +170,6 @@ fn issuer_update(c: &mut Criterion) {
 
 
         let mut witness: Vec<MembershipWitness> = (0..USERS).map(|i| MembershipWitness::new(&items[i], acc, &key)).collect();
-
-        //Creats a witness for some user
-        let y = items.last().unwrap().clone();
 
         // Gets set of updates and deletions
         let (_, revoked) = items.split_at(num_upds);
@@ -240,7 +199,6 @@ fn issuer_update(c: &mut Criterion) {
 
 
  
-// Batch update protocol of Vitto and Biryukov 2020 (https://eprint.iacr.org/2020/777)
 fn batch_update(c: &mut Criterion) {
     c.benchmark_group("client_batch_update");
     let mut batch_client_updates: Vec<usize> = (0..20_001).step_by(200).collect();
@@ -290,7 +248,6 @@ fn batch_update(c: &mut Criterion) {
 }
 
 
-// Batch update protocol of Vitto and Biryukov 2020 (https://eprint.iacr.org/2020/777)
 fn batch_update_aggr(c: &mut Criterion) {
     c.benchmark_group("client_batch_update");
     //let batch_client_updates: Vec<usize> = (0..11_000).step_by(200).collect();
@@ -335,10 +292,10 @@ fn batch_update_aggr(c: &mut Criterion) {
         // Batch update aggregation
         c.bench_function("Batch update with aggregation", |b| {
             b.iter(|| {
-                witness.batch_updates(y, &deletions, coefficients.iter().map(|c| c.as_slice()).collect()).unwrap();
+                witness.batch_update_aggr(y, &deletions, coefficients.iter().map(|c| c.as_slice()).collect()).unwrap();
             })
         });
-        assert!(witness.batch_updates_assign(y, &deletions, coefficients.iter().map(|c| c.as_slice()).collect()).unwrap().verify(y, PublicKey::from(&key), acc));
+        assert!(witness.batch_update_aggr_assign(y, &deletions, coefficients.iter().map(|c| c.as_slice()).collect()).unwrap().verify(y, PublicKey::from(&key), acc));
       
     }
 }

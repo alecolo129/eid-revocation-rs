@@ -279,11 +279,8 @@ impl Default for Accumulator {
 #[cfg(test)]
 mod tests {
     use std::time::Instant;
-
-    use group::ff::{Field, PrimeField};
-    use rand::rngs::OsRng;
-    use std::time::SystemTime;
-    use crate::{UpMsg, MembershipWitness, PublicKey};
+    use group::ff::Field;
+    use crate::{MembershipWitness, PublicKey};
 
     use super::*;
 
@@ -296,7 +293,7 @@ mod tests {
 
         // Get witness for random element
         let el  = Element::random();
-        let mut wit = MembershipWitness::new(&el, acc, &key);
+        let wit = MembershipWitness::new(&el, acc, &key);
         
         // Revoke first element
         let t = Instant::now();

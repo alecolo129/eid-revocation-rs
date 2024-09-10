@@ -220,7 +220,6 @@ impl TryFrom<&[u8; 96]> for PublicKey {
 mod tests {
     use std::time::Instant;
     use super::*;
-    use blsful::inner_types::G1Projective;
 
     #[test]
     fn key_batch_test() {
@@ -246,7 +245,7 @@ mod tests {
         let data = vec![Element(-key.0), Element::hash(b"value2")];
     
         // Compute ((-x+x)*(e_2+x))^-1
-        let del = key.batch_deletions(data.as_slice());
+        let _ = key.batch_deletions(data.as_slice());
     }
 
     #[test]

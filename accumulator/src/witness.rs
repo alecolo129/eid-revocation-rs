@@ -313,14 +313,10 @@ fn dd_evals(batch_dels: &Vec<&[Element]>, e: Scalar) -> Vec<Scalar> {
 
 #[cfg(test)]
 mod tests {
-    use rand::rngs::OsRng;
-    use serde::de::IntoDeserializer;
-
     use super::*;
     use crate::key;
     use std::time::Duration;
     use std::time::Instant;
-    use std::time::SystemTime;
 
     fn init(upd_size: usize) -> (key::SecretKey, key::PublicKey, Accumulator, Vec<Element>) {
         let key = SecretKey::new(Some(b"1234567890"));
@@ -429,7 +425,7 @@ mod tests {
 
         // Compute update coefficients
         let mut coefficients = Vec::new();
-        for i in (0..number_upds) {
+        for i in 0..number_upds {
             coefficients.push(acc.update_assign(&key, &deletions[i]));
         }
 

@@ -585,10 +585,8 @@ pub fn aggregate_eval_omega(omegas: Vec<PolynomialG1>, scalars: &Vec<Scalar>, e:
 
 #[cfg(test)]
 mod tests {
-    use core::time;
-    use std::time::{Duration, Instant, SystemTime};
+    use std::time::Instant;
     use group::{ff::PrimeField, Group};
-    use rand::{random, rngs::OsRng};
 
     use super::*;
     
@@ -599,9 +597,8 @@ mod tests {
         rand_core::OsRng{}.fill_bytes(&mut bytes);
         let mut int = u128::from_be_bytes(bytes);
 
-        // Two scalar representations of integer
+        // Scalar representations of integer
         let mut s = Scalar::from_u128(int); 
-        let mut s2 = s.clone();
 
         //Pick random shift value and apply mod to avoid huge rhs
         let mut rhs = [0u8; 8];
@@ -611,15 +608,15 @@ mod tests {
 
         // u128 shr_assign
         let t1 = Instant::now();
-        for i in 0..100{
-            int >> rhs;
+        for _ in 0..100{
+            let _ = int >> rhs;
         }
         let t1 = t1.elapsed();
         int >>= rhs;
 
         // Function shr_assign
         let t2 = Instant::now();
-        for i in 0..100{
+        for _ in 0..100{
             shr_assign(&mut s, rhs);
         }
         let t2 = t2.elapsed();
@@ -649,7 +646,7 @@ mod tests {
         let res2: Vec<G1Projective> = cs.iter().map(|c| v*c).collect();
         let t2 = t2.elapsed();
         
-        for i in (0..size){
+        for i in 0..size{
             assert_eq!(res[i], res2[i]);
         }
         
@@ -663,7 +660,7 @@ mod tests {
         
         let d = 1<<8;
         let mut p = PolynomialG1::with_capacity(d);
-        for i in 0..d{
+        for _ in 0..d{
             p.0.push(G1Projective::random(rand_core::OsRng{}));
         }
 
@@ -689,11 +686,9 @@ mod tests {
     fn utils_test_point_add(){
 
 
-        let xs: Vec<G1Projective> = (0..100).map(|_|G1Projective::random(rand_core::OsRng{})).collect();
-        let ys: Vec<G1Projective> = (0..100).map(|_|G1Projective::random(rand_core::OsRng{})).collect();
-        
+        let xs: Vec<G1Projective> = (0..100).map(|_|G1Projective::random(rand_core::OsRng{})).collect();        
         let t1 = Instant::now();
-        xs.iter().enumerate().for_each(|(i,&x)| {x.double();});
+        xs.iter().for_each(|&x| {let _ = x.double();});
         let t1 = t1.elapsed();
         
         println!("100 add: {:?}", t1);
@@ -708,7 +703,7 @@ mod tests {
         let ys: Vec<Scalar> = (0..100).map(|_|Scalar::random(rand_core::OsRng{})).collect();
         
         let t1 = Instant::now();
-        xs.iter().enumerate().for_each(|(i,&x)| {x*ys[i];});
+        xs.iter().enumerate().for_each(|(i,&x)| {let _ = x*ys[i];});
         let t1 = t1.elapsed();
         
         println!("100 mul: {:?}", t1);
@@ -720,9 +715,9 @@ mod tests {
     fn utils_test_window(){
         
         let d = 16_384;
-        let mut point =  G1Projective::random(rand_core::OsRng{});
+        let point =  G1Projective::random(rand_core::OsRng{});
 
-        let scalars: Vec<Scalar> = (1..=d).map(|i| Scalar::random(rand_core::OsRng{})).collect();
+        let scalars: Vec<Scalar> = (1..=d).map(|_| Scalar::random(rand_core::OsRng{})).collect();
         
         let t = Instant::now();
         let a = window_mul(point, scalars.clone());         
