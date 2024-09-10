@@ -204,9 +204,9 @@ fn batch_update(c: &mut Criterion) {
     let mut batch_client_updates: Vec<usize> = (0..20_001).step_by(200).collect();
     batch_client_updates[0]=1;
 
-   // let batch_client_updates: Vec<usize> = (0..16).map(|i| 1<<i).step_by(2).collect();
+    let batch_client_updates: Vec<usize> = (0..16).map(|i| 1<<i).step_by(2).collect();
 
-    for num_ups in [5000]{
+    for num_ups in batch_client_updates{
         println!("=================================================");
         println!(
             "=Batch update Benchmark with {} deletions=",
