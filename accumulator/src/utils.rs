@@ -113,7 +113,7 @@ impl PolynomialG1 {
         // Compute 1,x,...,x^d
         let scalars = self.compute_powers_for_eval(x);
 
-        return msm_naf(&self.0, &scalars);
+        return msm(&self.0, &scalars);
     }
 
     pub fn degree(&self)->usize{
@@ -274,6 +274,7 @@ impl core::ops::MulAssign<Scalar> for PolynomialG1 {
 }
 
 
+/// Rewrite `scalars` in Non-Adjacent Form (NAF), using the input window size `c`.
 fn to_naf(scalars: &Vec<Scalar>, c: u32) -> Vec<Vec<i128>> {
     
     let h = Scalar::NUM_BITS.div_ceil(c);
@@ -286,19 +287,23 @@ fn to_naf(scalars: &Vec<Scalar>, c: u32) -> Vec<Vec<i128>> {
         .map(|&a| {
             let mut a = a;
             let cond = a > t;
+
+            // If a>(q^h)/2 => a = -a
             cond.then(|| a = -a);
+
+            // Vector `bs` will contain the base-b representation of `a`
             let mut bs = Vec::with_capacity(h as usize);
             let mut ret = 0;
             
             (0..(h as usize)).for_each(|j| {
 
-                let mut a = a;
-
                 // Extract the `c` bits correspondig to our window:
-                // Right-shift by w_start to remove the lower bits
-                let mut bytes = shr_assign(&mut a, j * c as usize);
+                // Right-shift by w_start=j*c to remove the lower bits
+                let mut bytes = shr_assign(&a, j * c as usize);
+            
                 // Apply mod 2^{window size} to the result to remove the higher bits
                 apply_modulo2(&mut bytes, c as usize);
+                
                 let mut a_j = scalar_to_usize(&bytes) as i128;
                 a_j += ret;
 
@@ -311,7 +316,7 @@ fn to_naf(scalars: &Vec<Scalar>, c: u32) -> Vec<Vec<i128>> {
                 }
             });
             
-
+            // If a>(q^h)/2 => invert all coefficients
             cond.then(|| bs.iter_mut().for_each(|b| {
                 *b = -(*b);
             }
@@ -324,7 +329,8 @@ fn to_naf(scalars: &Vec<Scalar>, c: u32) -> Vec<Vec<i128>> {
 
 
 /// Optimized implementation of multi-scalar multiplication adapted from ark-ec library.
-pub fn msm_naf(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Projective> {
+/// Given a list of coefficients `P_1,...,P_m` and scalars `c_1,...,c_m`, compute ∑^{m}_{i=1} c_i * P_i
+pub fn msm(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Projective> {
 
     // If the polynomial is empty we return None
     if coeff.is_empty() || coeff.len() != scalars.len() {
@@ -403,86 +409,6 @@ pub fn msm_naf(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Pro
 }
 
 
-/// Optimized implementation of multi-scalar multiplication adapted from ark-ec library. 
-pub fn msm(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Projective> {
-    /*
-        TODO: consider rewriting library using ark-ec and adopting their implementation of msm. 
-    */
-
-    // If the polynomial is empty we return None
-    if coeff.is_empty() || coeff.len() != scalars.len(){
-        return None;
-    }
-
-    
-    // Get an iterator with coefficients and scalars pairs (c_1, 1), (c_2,x), ..., (c_d, x^d) 
-    let scalars_and_coeff_iter = scalars.iter().zip(coeff.clone());
-    
-    // Get widow size
-    let c = match scalars.len() {
-        size if size>=32 => (usize::ilog2(size) * 69 / 100) as usize + 2,
-        _ => 3
-    };
-
-    // Get indexes of msm windows
-    let num_bits = Scalar::BYTES*8 as usize;
-    let window_starts: Vec<_> = (0..num_bits).step_by(c).collect();
-    let zero = G1Projective::IDENTITY;
-    
-    // Each window is of size `c`.
-    // We divide up the bits 0..num_bits into windows of size `c`, and
-    // process each such window.
-    let window_sums: Vec<_> = window_starts.into_iter()
-        .map(|w_start| {
-            let mut res = zero;
-            // We don't need the "zero" bucket, so we only have 2^c - 1 buckets.
-            let mut buckets = vec![zero; (1 << c) - 1];
-            scalars_and_coeff_iter.clone().for_each(|(scalar, base)| {                    
-                
-                let mut scalar = scalar.clone();
-
-                // Extract the `c` bits correspondig to our window:
-                // Right-shift by w_start to remove the lower bits
-                let mut bytes = shr_assign(&mut scalar, w_start);
-  
-                // Apply mod 2^{window size} to the result to remove the higher bits
-                apply_modulo2(&mut bytes, c);
-
-                // The remaining extracted bits form our index in the bucket
-                let index = scalar_to_usize(&bytes);
-                
-                // If the scalar is non-zero, we update the corresponding
-                // bucket.
-                if index != 0 {
-                    buckets[index - 1] += base;
-                }
-                
-            });
-            let mut running_sum = G1Projective::IDENTITY;
-            buckets.into_iter().rev().for_each(|b| {
-                running_sum += &b;
-                res += &running_sum;
-            });
-            res
-        })
-        .collect();
-
-        // We store the sum for the lowest window.
-    let lowest = *window_sums.first().unwrap();
-    
-    // We're traversing windows from high to low.
-    Some(lowest
-        + &window_sums[1..]
-            .iter()
-            .rev()
-            .fold(zero, |mut total, sum_i| {
-                total += sum_i;
-                for _ in 0..c {
-                    total = total.double();
-                }
-                total
-            }))
-}
 
 /// A Polynomial for scalars
 #[derive(Default, Clone)]
@@ -654,7 +580,7 @@ pub fn aggregate_eval_omega(omegas: Vec<PolynomialG1>, scalars: &Vec<Scalar>, e:
 
     //Point Vector
     let omega: Vec<G1Projective> = omegas.into_iter().map(|p| p.0).flatten().collect();
-    msm_naf(&omega, &scalars)
+    msm(&omega, &scalars)
 }
 
 #[cfg(test)]
@@ -788,43 +714,6 @@ mod tests {
         println!("100 mul: {:?}", t1);
         
     }
-
-
-    #[test]
-    fn utils_test_msm() {
-        let d = 10_000;
-        let mut p = PolynomialG1::with_capacity(d);
-        let mut c = G1Projective::random(rand_core::OsRng {});
-        for i in 0..d {
-            p.0.push(c);
-            c = c.double();
-        }
-        println!("Finished creating poly");
-
-        let x = Scalar::random(rand_core::OsRng {});
-
-
-        let inner_p = p.0.clone();
-        let p = vec![p];
-
-        
-        let t1 = Instant::now();
-        let scalars = aggregate_d(&p, &vec![Scalar::ONE], x);
-        let r1 = msm_naf(&inner_p, &scalars).unwrap();
-        let t1 = t1.elapsed();
-
-        let t2 = Instant::now();
-        let scalars = aggregate_d(&p, &vec![Scalar::ONE], x);
-        let r2 = msm(&inner_p, &scalars).unwrap();
-        let t2 = t2.elapsed();
-
-
-        println!("Evaluate msm naf: {:?}", t1);
-        println!("Evaluate msm: {:?}", t2);
-
-        assert_eq!(r1, r2);
-    }
-        
 
 
     #[test]
