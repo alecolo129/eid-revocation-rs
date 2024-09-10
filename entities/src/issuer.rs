@@ -228,8 +228,6 @@ mod tests {
     use super::*;
     use crate::holder::Holder;
     use crate::verifier::Verifier;
-    use accumulator::{generate_fr, witness, SALT};
-    use core::num;
     use std::time::{Instant, SystemTime};
     const ADD_SIZE: usize = 1000;
     //const _SIZE: usize = 10;
@@ -255,7 +253,6 @@ mod tests {
         //Holder
         let holder = Holder::new(String::from("Holder"), rh, pp.clone());
         let t = Instant::now();
-        let proof_params = iss.get_proof_params();
         let proof = holder.proof_membership(None);
         println!(
             "Time to create membership proof: {:?}",
@@ -299,14 +296,14 @@ mod tests {
         let valid_y = elements[1];
         let mut valid_wit = witness[1];
         assert!(!valid_wit.verify(valid_y, issuer.get_pk(), issuer.get_accumulator()));
-        valid_wit.batch_update_assign(valid_y, polys.deletions.as_slice(), polys.omegas.as_slice());
+        assert!(valid_wit.batch_update_assign(valid_y, polys.deletions.as_slice(), polys.omegas.as_slice()).is_ok());
         assert!(valid_wit.verify(valid_y, issuer.get_pk(), issuer.get_accumulator()));
 
         // Check revoked witness is always invalid
         let revoked_y = elements[0];
         let mut revoked_wit = witness[0];
         assert!(!revoked_wit.verify(revoked_y, issuer.get_pk(), issuer.get_accumulator()));
-        revoked_wit.batch_update_assign(elements[0], polys.deletions.as_slice(), polys.omegas.as_slice());
+        assert!(revoked_wit.batch_update_assign(elements[0], polys.deletions.as_slice(), polys.omegas.as_slice()).is_err());
         assert!(!revoked_wit.verify(revoked_y, issuer.get_pk(), issuer.get_accumulator()));
         assert!(issuer.deletions.is_empty())
     }
@@ -342,14 +339,14 @@ mod tests {
         let valid_y = elements[num_deletions];
         let mut valid_wit = witness[num_deletions];
         assert!(!valid_wit.verify(valid_y, issuer.get_pk(), issuer.get_accumulator()));
-        valid_wit.batch_update_assign(valid_y, polys.deletions.as_slice(), polys.omegas.as_slice());
+        assert!(valid_wit.batch_update_assign(valid_y, polys.deletions.as_slice(), polys.omegas.as_slice()).is_ok());
         assert!(valid_wit.verify(valid_y, issuer.get_pk(), issuer.get_accumulator()));
 
         // Check revoked witness is always invalid
         let revoked_y = elements[0];
         let mut revoked_wit = witness[0];
         assert!(!revoked_wit.verify(revoked_y, issuer.get_pk(), issuer.get_accumulator()));
-        revoked_wit.batch_update_assign(elements[0], polys.deletions.as_slice(), polys.omegas.as_slice());
+        let _ = revoked_wit.batch_update_assign(elements[0], polys.deletions.as_slice(), polys.omegas.as_slice());
         assert!(!revoked_wit.verify(revoked_y, issuer.get_pk(), issuer.get_accumulator()));
         assert!(issuer.deletions.is_empty())
     }
@@ -420,7 +417,7 @@ mod tests {
         let mut valid_wit = witness[0];
         assert!(!valid_wit.verify(valid_y, issuer.get_pk(), issuer.get_accumulator()));
         for poly in &polys{
-            valid_wit.batch_update_assign(valid_y, &poly.deletions, &poly.omegas);
+            let _ = valid_wit.batch_update_assign(valid_y, &poly.deletions, &poly.omegas);
         }
         assert!(valid_wit.verify(valid_y, issuer.get_pk(), issuer.get_accumulator()));
 
@@ -429,7 +426,7 @@ mod tests {
         let mut revoked_wit = witness[1];
         assert!(!revoked_wit.verify(revoked_y, issuer.get_pk(), issuer.get_accumulator()));
         for poly in &polys{
-            revoked_wit.batch_update_assign(revoked_y, &poly.deletions, &poly.omegas);
+            let _ = revoked_wit.batch_update_assign(revoked_y, &poly.deletions, &poly.omegas);
         }        
         assert!(!revoked_wit.verify(revoked_y, issuer.get_pk(), issuer.get_accumulator()));
         assert!(issuer.deletions.is_empty())
