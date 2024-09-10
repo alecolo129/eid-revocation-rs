@@ -45,7 +45,7 @@ impl Updatable for Verifier{
 
 #[cfg(test)]
 mod tests {
-    use crate::{Holder, Issuer, Verifier};
+    use crate::{Holder, Issuer, Updatable, Verifier};
     use std::time::Instant; 
 
 
@@ -92,7 +92,7 @@ mod tests {
 
         // Update verifier
         let new_acc = issuer.get_accumulator();
-        ver.update_acc(new_acc);
+        ver.update_accumulator(new_acc);
 
         // Compute proof
         let proof = holder.proof_membership(None);
