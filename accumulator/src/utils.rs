@@ -346,12 +346,10 @@ pub fn msm(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Project
     let scalars = to_naf(scalars, c as u32);
 
     // Get indexes of msm windows
-    let num_bits = Scalar::BYTES * 8 as usize;
-    let window_starts: Vec<_> = (0..num_bits).step_by(c).collect();
+    let window_starts: Vec<_> = (0..Scalar::NUM_BITS.div_ceil(c as u32)).map(|i| i*(c as u32)).collect();
+    
     let zero = G1Projective::IDENTITY;
-
     let scalars_and_coeff_iter = scalars.iter().zip(coeff);
-
     // Each window is of size `c`.
     // We divide up the bits 0..num_bits into windows of size `c`, and
     // process each such window.
