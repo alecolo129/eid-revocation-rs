@@ -1,5 +1,5 @@
 use accumulator::{
-    accumulator::Element, proof::{self, Proof, ProofParamsPublic, PROOF_LABEL}, witness::{UpMsg, MembershipWitness}, Accumulator, Error, ProofParamsPrivate
+    accumulator::Element, proof::{self, Proof, ProofParamsPublic, PROOF_LABEL}, witness::{MembershipWitness, UpMsg}, Accumulator, Coefficient, Error, ProofParamsPrivate
 };
 use crate::{issuer::RevocationHandle, UpdatePolynomials};
 use crate::Updatable;
@@ -33,19 +33,12 @@ impl Holder {
         self.w.batch_update_assign(self.y, &update_poly.deletions, &update_poly.omegas)
     }
 
-    /// Sequentially apply multiples batch updates to the holder's witness 
-    /// with the array update polynomials received as input.
-    pub fn batch_updates(& mut self, update_poly: &[UpdatePolynomials]) -> Result<MembershipWitness, Error>{
-        let mut result: Result<MembershipWitness, Error> = Err(Error::from_msg(3, "Input polynomial vector is empty"));
-        
-        for up in update_poly{
-            result = self.w.batch_update_assign(self.y, &up.deletions, &up.omegas);
-            if result.is_err(){
-                return Err(result.err().unwrap());
-            }
-        }
-        
-        result
+    /// Aggregate multiples batch updates to the holder's witness 
+    /// using the array update polynomials received as input.
+    pub fn batch_updates(& mut self, update_poly: &[UpdatePolynomials]) -> Result<MembershipWitness, Error>{  
+        let deletions: Vec<&[Element]> = update_poly.iter().map(|up| up.deletions.as_slice()).collect();
+        let coefficients: Vec<&[Coefficient]> = update_poly.iter().map(|up| up.omegas.as_slice()).collect();
+        self.w.batch_update_aggr_assign(self.y, &deletions, coefficients)
     }
     
     /// Replace the holder's witness with the input witness `new_mw`.
@@ -101,13 +94,9 @@ impl Updatable for Holder{
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::holder::Holder;
-    use crate::verifier::Verifier;
     use crate::issuer::Issuer;
-    use accumulator::{generate_fr, witness, SALT};
-    use core::num;
-    use std::time::{Instant, SystemTime};
+    use std::time::Instant;
     const ADD_SIZE: usize = 1001;
 
     #[test]
@@ -129,10 +118,10 @@ mod tests {
         let pp = issuer.get_proof_params();
 
         // Check non-revoked holder is invalid before updating and is valid after updating
-        let mut valid_hol = &mut holders[0];
+        let valid_hol = &mut holders[0];
         assert!(!valid_hol.test_membership(Some(pp)));
         let t = Instant::now();
-        valid_hol.batch_update(&polys);
+        assert!(valid_hol.batch_update(&polys).is_ok());
         let t = t.elapsed();
         assert!(valid_hol.test_membership(Some(pp)));
         println!("Time to update witness using polys after single update: {:?}",
@@ -140,9 +129,9 @@ mod tests {
         );
 
         // Check revoked holder is always invalid
-        let mut revoked_hol = &mut holders[1];
+        let revoked_hol = &mut holders[1];
         assert!(!revoked_hol.test_membership(Some(pp)));
-        revoked_hol.batch_update(&polys);
+        assert!(revoked_hol.batch_update(&polys).is_err());
         assert!(!revoked_hol.test_membership(Some(pp)));
     }
 
@@ -166,21 +155,21 @@ mod tests {
         let pp = issuer.get_proof_params();
 
         // Check non-revoked holder is invalid before updating and is valid after updating
-        let mut valid_hol = &mut holders[0];
+        let valid_hol = & mut holders[0];
         assert!(!valid_hol.test_membership(Some(pp)));
         let t = Instant::now();
-        valid_hol.batch_update(&polys);
+        let res = valid_hol.batch_update(&polys);
         let t = t.elapsed();
-        assert!(valid_hol.test_membership(Some(pp)));
+        assert!(res.is_ok() && valid_hol.test_membership(Some(pp)));
         println!("Time to update witness after {} revocations in single batch: {:?}",
             polys.deletions.len(),
             t
         );
 
         // Check revoked holder is always invalid
-        let mut revoked_hol = &mut holders[1];
+        let revoked_hol = &mut holders[1];
         assert!(!revoked_hol.test_membership(Some(pp)));
-        revoked_hol.batch_update(&polys);
+        assert!(revoked_hol.batch_update(&polys).is_err());
         assert!(!revoked_hol.test_membership(Some(pp)));
     }
 
@@ -214,13 +203,13 @@ mod tests {
         
         // Check non-revoked holder is invalid before updating and is valid after updating
         let pp = issuer.get_proof_params();
-        let mut valid_hol = &mut holders[0];
+        let valid_hol = &mut holders[0];
         assert!(!valid_hol.test_membership(Some(pp)));
         
         let t = Instant::now();
-        valid_hol.batch_updates(polys.as_slice());
+        let res = valid_hol.batch_updates(polys.as_slice());
         let t = t.elapsed();
-        assert!(valid_hol.test_membership(Some(pp)));
+        assert!(res.is_ok() && valid_hol.test_membership(Some(pp)));
         println!("Time to update witness after {} revocations in {} batches of {} elements: {:?}",
             ADD_SIZE-1,
             (((ADD_SIZE-1) as f64)/ (CHUNK_SIZE as f64)).ceil(),
@@ -229,9 +218,9 @@ mod tests {
         );
 
         // Check revoked holder is always invalid
-        let mut revoked_hol = &mut holders[1];
+        let revoked_hol = &mut holders[1];
         assert!(!revoked_hol.test_membership(Some(pp)));
-        revoked_hol.batch_updates(polys.as_slice());
+        assert!(revoked_hol.batch_updates(polys.as_slice()).is_err());
         assert!(!revoked_hol.test_membership(Some(pp)));
     }
 }
