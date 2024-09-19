@@ -21,64 +21,13 @@ const NUM_SAMPLES: usize = 30; // the number of samples for each benchmark
 
 criterion_group!(name = benches;
     config = Criterion::default().sample_size(NUM_SAMPLES);
-    targets = issuer_gen, issuer_update, issuer_add, issuer_del, client_upd_single, client_upd_sequential, batch_update, batch_update_aggr
+    targets = client_upd_single, client_upd_sequential, batch_update, batch_update_aggr
 );
 criterion_main!(benches);
 
-
-
-fn issuer_gen(c: &mut Criterion) {
-    c.benchmark_group("issuer_core");
-        
-        println!("=================================================");
-        println!(
-            "=Issuer Generation Benchmark"
-        );
-        println!("=================================================");
-    
-        c.bench_function("Gen", |b| {
-            b.iter(|| {
-                Issuer::new(None);
-            })
-        });   
-}
-
-fn issuer_add(c: &mut Criterion) {
-    c.benchmark_group("issuer_core");
-        println!("=================================================");
-        println!(
-            "=Issuer Addition Benchmark"
-        );
-        println!("=================================================");
-        let acc = Accumulator::random(rand_core::OsRng{});
-        let sk = SecretKey::new(None);
-        let el = Element::random();
-        c.bench_function("Add", |b| {
-            b.iter(|| {
-                MembershipWitness::new(&el, acc, &sk);
-            })
-        });   
-}
-
-
-fn issuer_del(c: &mut Criterion) {
-    c.benchmark_group("issuer_core");
-        println!("=================================================");
-        println!(
-            "=Issuer Addition Benchmark"
-        );
-        println!("=================================================");
-        let mut acc = Accumulator::random(rand_core::OsRng{});
-        let sk = SecretKey::new(None);
-        let el = Element::random();
-        c.bench_function("Del", |b| {
-            b.iter(|| {
-                acc.remove_assign(&sk, el);
-            })
-        });   
-}
-
-
+/**
+    Banchmark single update algorithm `WitUp_H` defined in page 25.
+*/
 fn client_upd_single(c: &mut Criterion) {
     c.benchmark_group("client_core");
         println!("=================================================");
@@ -86,22 +35,34 @@ fn client_upd_single(c: &mut Criterion) {
             "=Client Single Update Benchmark"
         );
         println!("=================================================");
+        
+        // Init parameters
         let acc = Accumulator::random(rand_core::OsRng{});
         let sk = SecretKey::new(None);
+        
+        // Create non-revoked and revoked elemnts
         let (el, deleted_el) = (Element::random(), Element::random());
 
-        let mut wit = MembershipWitness::new(&el, acc, &sk);
+        // Issue witness
+        let wit = MembershipWitness::new(&el, acc, &sk);
+        
+        // Revoke element and get update message
         let new_acc = acc.remove(&sk, deleted_el);
-    
         let del = UpMsg(new_acc, deleted_el);
+
         c.bench_function("Upd", |b| {
             b.iter(|| {
-                wit.update_assign(el, &[del])
+                // Update after single deletion
+                let _ = wit.update(el, &[del]);
             })
         });   
+
 }
 
 
+/**
+    Banchmark sequential application of single update algorithm `WitUp_H` defined in page 25.
+*/
 fn client_upd_sequential(c: &mut Criterion) {
     c.benchmark_group("client_core");
         println!("=================================================");
@@ -110,7 +71,8 @@ fn client_upd_sequential(c: &mut Criterion) {
         );
         println!("=================================================");
         
-        let upds: Vec<usize> = (0..16).map(|i| 1<<i).step_by(2).collect();
+        let mut upds: Vec<usize> = (0..20_001).step_by(200).collect();
+        upds[0]=1;
 
         for upd in upds{
             println!("=================================================");
@@ -142,6 +104,7 @@ fn client_upd_sequential(c: &mut Criterion) {
             
             c.bench_function("SeqUpd", |b| {
                 b.iter(|| {
+                    // Sequentially update after multiple deletions
                     let mut wit = witness.clone();
                     wit.update_assign(y, dels.as_slice());
                 })
@@ -150,61 +113,14 @@ fn client_upd_sequential(c: &mut Criterion) {
 }
 
 
-fn issuer_update(c: &mut Criterion) {
-    c.benchmark_group("issuer_update");
-
-
-    for num_upds in UPDATES {
-        println!("=================================================");
-        println!(
-            "=Issuer Update Benchmark with {} updates=",
-            num_upds
-        );
-        println!("=================================================");
-
-        // Creates a random array of users
-        let key = SecretKey::new(None);
-        let items: Vec<Element> = (0..USERS).map(|_| Element::random()).collect();
-        let mut acc = Accumulator::random(rand_core::OsRng {});
-
-
-
-        let mut witness: Vec<MembershipWitness> = (0..USERS).map(|i| MembershipWitness::new(&items[i], acc, &key)).collect();
-
-        // Gets set of updates and deletions
-        let (_, revoked) = items.split_at(num_upds);
-        witness.truncate(num_upds);
-
-
-        // Benchmark of deletion method
-        let mut coeff = Scalar::ONE;
-    
-        c.bench_function("Batch Deletion", |b| {
-            b.iter(|| {
-                coeff = key.batch_deletions(revoked).0;
-                acc.0 *= coeff;
-            })
-        });
-        
-        
-
-
-        // Adds up the length of each message that must be sent
-        // from each deletion update
-        let (bytes_wit, bytes_acc) = (bincode::serialize(&witness[0]).expect("Serialization errror..."), bincode::serialize(&acc).expect("Serialization errror..."));
-        let payload = bytes_wit.len() + bytes_acc.len();
-        println!("Update server->user message size {} bytes", payload);
-    }
-}
-
-
- 
+/**
+    Banchmark batch update algorithm `WitUpBatch_H` defined in page 39 after a single batch deletion (i.e., without computing any aggregation).    
+ */
 fn batch_update(c: &mut Criterion) {
     c.benchmark_group("client_batch_update");
+    
     let mut batch_client_updates: Vec<usize> = (0..20_001).step_by(200).collect();
     batch_client_updates[0]=1;
-
-    let batch_client_updates: Vec<usize> = (0..16).map(|i| 1<<i).step_by(2).collect();
 
     for num_ups in batch_client_updates{
         println!("=================================================");
@@ -248,11 +164,14 @@ fn batch_update(c: &mut Criterion) {
 }
 
 
+/**
+    Banchmark aggregation batch update algorithm `WitUpBatch_H` aggregating multiple updates using the `WitUpBatch_H` algorithm defined in page 39.
+    As a comparison, we also banchmark a sequential application of the batch update algorithm without using any aggregation.    
+ */
 fn batch_update_aggr(c: &mut Criterion) {
     c.benchmark_group("client_batch_update");
-    //let batch_client_updates: Vec<usize> = (0..11_000).step_by(200).collect();
 
-    let upd_size = 10_000;
+    let upd_size = 5_000;
 
     let mut ms: Vec<usize> = (1..200).step_by(10).collect();
     ms.append(&mut (200..=upd_size).step_by(200).collect());
@@ -276,9 +195,9 @@ fn batch_update_aggr(c: &mut Criterion) {
 
         // Creates lists of elements delete
         let deletions: Vec<&[Element]> = items[1..].chunks(m).collect();
-        println!("Starting to generate up poly:");
         
         // Creates update polynomials
+        println!("Starting to generate up poly:");
         let coefficients: Vec<Vec<accumulator::Coefficient>> = deletions.iter().map(|del|  acc.update_assign(&key, &del)).collect();
         println!("Upd poly finished");
         
@@ -295,7 +214,6 @@ fn batch_update_aggr(c: &mut Criterion) {
                 witness.batch_update_aggr(y, &deletions, coefficients.iter().map(|c| c.as_slice()).collect()).unwrap();
             })
         });
-        assert!(witness.batch_update_aggr_assign(y, &deletions, coefficients.iter().map(|c| c.as_slice()).collect()).unwrap().verify(y, PublicKey::from(&key), acc));
-      
+        assert!(witness.batch_update_aggr_assign(y, &deletions, coefficients.iter().map(|c| c.as_slice()).collect()).unwrap().verify(y, PublicKey::from(&key), acc)); 
     }
 }
