@@ -5,6 +5,7 @@ use group::ff::{Field, PrimeField};
 use rand_core::{CryptoRng, RngCore};
 use sha3::Shake256;
 
+const NUM_BITS: usize = Scalar::NUM_BITS as usize; 
 
 
 /// Similar to https://tools.ietf.org/html/draft-irtf-cfrg-bls-signature-04#section-2.3
@@ -151,18 +152,18 @@ pub fn window_mul(point: G1Projective, coefficients: Vec<Scalar>)-> Vec<G1Projec
     coefficients.iter().map(|&coeff| {        
         // Result of the multiplication            
         let mut res = zero;
+        let bytes = &coeff.to_be_bytes();
         window_starts.iter().rev().for_each(|&w_start|{
-            
-            let mut coeff = coeff.clone();
 
 
             // Extract the `c` bits of the scalar for our current window
             // Shift right to remove LSB, apply modulo 2 to remove MSB
-            let mut bytes = shr_assign(&mut coeff, w_start);
-            apply_modulo2(&mut bytes, c);
-
+            //let mut bytes = shr_assign(&mut coeff, w_start);
+            //apply_modulo2(&mut bytes, c);
             // Get the index on the precomputed table
-            let index = scalar_to_usize(&bytes);
+            //let index = scalar_to_usize(&bytes);
+
+            let index = extract_bits_range_unchecked(bytes, w_start, c);
 
             if index!=0{
                 res+=table[index-1];
@@ -179,75 +180,28 @@ pub fn window_mul(point: G1Projective, coefficients: Vec<Scalar>)-> Vec<G1Projec
 }
 
 
-/// Unchecked conversion from `Scalar` to `usize`, truncating to the LSB.
-fn scalar_to_usize(bytes: &[u8;32]) -> usize {
-    const BITS: usize = (usize::BITS/8) as usize;
-    let bytes: [u8; BITS] = bytes[32-BITS..32].try_into().expect("Invalid number of bytes during conversion");
-    usize::from_be_bytes(bytes)
-}
-
-/// Performs the >>= operator to a Scalar.
-#[inline]
-fn shr_assign(s: &Scalar, rhs: usize) -> [u8; 32]{
-    // The default implementation in blsful::inner_types::Scalar is unstable, and works only when rhs != 0 & 2^rhs<s
-    // If bits to shift are more than Scalar bits, we set scalar to 0
+fn extract_bits_range_unchecked(data: &[u8; NUM_BITS+1>>3], window_start: usize, window_size: usize) -> usize {
+   
     
-    let mut bytes = s.to_be_bytes();
-    if rhs >= (Scalar::NUM_BITS as usize){
-        bytes.fill(0);
-        return bytes;
+    let window_start = NUM_BITS-window_start;
+    let window_size = usize::min(window_start, window_size);
+
+    let mut result = 0usize;
+
+    // Extract bits from position `n` to `n + x`
+    for i in 0..window_size {
+        let bit_position = window_start - i;
+        let byte_index = bit_position / 8;
+        let bit_offset = bit_position % 8;
+        // Extract the bit and shift it to the correct position in the result
+        
+        let bit_value = data[byte_index]>>(7 - bit_offset) & 1;
+        result = result | (bit_value as usize)<<i;
+        
+        
     }
-
-    /*TODO: do this in one pass */
-    //Get the number of bytes that will be fully (resp. partially) zero
-    
-    let del_full = rhs >> 3;
-    let del_par = (rhs % 8) as u32; 
-    let mask = 0xFF_u8.wrapping_shr(8 - del_par);
-    
-    if del_par>0 {
-        let mut rem: u8 = 0x00; 
-        bytes.iter_mut().for_each(|b|{
-            let temp = *b & mask; 
-            *b >>= del_par;
-            *b += rem;
-            rem = temp<<(8 - del_par);
-        });
-    }
-    
-    
-
-    for i in (del_full..bytes.len()).rev(){
-        bytes[i]=bytes[i-del_full];   
-    }
-    
-    
-    bytes[..del_full].fill(0);
-    
-    return bytes;
+    result
 }
-
-/// Clear the first `n` bits of the Scalar `s`, starting from the MSB
-fn clear_left_bits(bytes: &mut [u8; 32], n: usize){
-
-    let k = usize::min(Scalar::NUM_BITS as usize, n);
-    
-    let zeros = k>>3;
-    let remainder = k%8;
-
-    bytes[..zeros].fill(0);
-
-    if remainder>0 {
-        let mask: u8 = (1 << (8-remainder))-1;
-        bytes[zeros] &= mask;
-    }
-}
-
-/// Reduces the scalar `s` modulo  `2^n`
-fn apply_modulo2(bytes: &mut [u8; 32], n: usize){
-    clear_left_bits(bytes, 32*8-n);    
-}
-
 
 
 impl core::ops::AddAssign for PolynomialG1 {
@@ -294,17 +248,13 @@ fn to_naf(scalars: &Vec<Scalar>, c: u32) -> Vec<Vec<i128>> {
             // Vector `bs` will contain the base-b representation of `a`
             let mut bs = Vec::with_capacity(h as usize);
             let mut ret = 0;
-            
+            let bytes = &a.to_be_bytes();
             (0..(h as usize)).for_each(|j| {
 
                 // Extract the `c` bits correspondig to our window:
-                // Right-shift by w_start=j*c to remove the lower bits
-                let mut bytes = shr_assign(&a, j * c as usize);
-            
-                // Apply mod 2^{window size} to the result to remove the higher bits
-                apply_modulo2(&mut bytes, c as usize);
-                
-                let mut a_j = scalar_to_usize(&bytes) as i128;
+                let mut a_j = extract_bits_range_unchecked(bytes, j*c as usize, c as usize) as i128;                
+               
+                // Add remainder
                 a_j += ret;
 
                 if a_j <= q_half || j == (h - 1) as usize{
@@ -343,24 +293,23 @@ pub fn msm(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Project
         _ => 3,
     };
 
+
     let scalars = to_naf(scalars, c as u32);
 
     // Get indexes of msm windows
     let window_starts: Vec<_> = (0..Scalar::NUM_BITS.div_ceil(c as u32)).map(|i| i*(c as u32)).collect();
-    
     let zero = G1Projective::IDENTITY;
     let scalars_and_coeff_iter = scalars.iter().zip(coeff);
-    // Each window is of size `c`.
-    // We divide up the bits 0..num_bits into windows of size `c`, and
-    // process each such window.
+
+
+    // By rewriting coefficient in NAF form we can save half of the buckets, so we only have 2^(c-1) buckets.
+    let mut buckets = vec![zero; 1 << (c-1)];
+
     let window_sums: Vec<_> = window_starts
         .into_iter()
         .enumerate()
         .map(|(i,_)| {
             let mut res = zero;
-
-            // We don't need the "zero" bucket, so we only have 2^(c-1) buckets.
-            let mut buckets = vec![zero; 1 << (c-1)];
 
             scalars_and_coeff_iter.clone().for_each(|(scalar, &base)| {
                 let index = scalar[i];
@@ -378,11 +327,16 @@ pub fn msm(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Project
                 );
             });
 
+            // Compute sum for current window size
             let mut running_sum = G1Projective::IDENTITY;
-            buckets.into_iter().rev().for_each(|b| {
+            buckets.iter().rev().for_each(|&b| {
                 running_sum += &b;
                 res += &running_sum;
             });
+
+            //Clean-up buckets for next iteration
+            buckets.fill(zero);
+            
             res
         })
         .collect();
@@ -583,13 +537,14 @@ pub fn aggregate_eval_omega(omegas: Vec<PolynomialG1>, scalars: &Vec<Scalar>, e:
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
+    use core::time;
+    use std::time::{Duration, Instant};
     use group::{ff::PrimeField, Group};
 
     use super::*;
     
     #[test]
-    fn utils_test_shr(){
+    fn utils_test_extract_bits_range(){
         // Pick random u128 
         let mut bytes = [0u8; 16];
         rand_core::OsRng{}.fill_bytes(&mut bytes);
@@ -598,36 +553,37 @@ mod tests {
         // Scalar representations of integer
         let mut s = Scalar::from_u128(int); 
 
-        //Pick random shift value and apply mod to avoid huge rhs
-        let mut rhs = [0u8; 8];
-        rand_core::OsRng{}.fill_bytes(&mut rhs);
-        let mut rhs = usize::from_be_bytes(rhs);
-        rhs %= Scalar::BYTES+2;
+        println!("scalar: {int}, bytes: {:?}", s.to_be_bytes());
+   
+        // Function extract bits
+        for window_size in 1..31{
+            println!("\n### window_size: {window_size} ###\n");
+            
+            let mut d_1 = Duration::from_micros(0);
+            let mut d_2 = Duration::from_micros(0);
+            let mut res_1 = Vec::new();
+            let mut res_2 = Vec::new();
+            
+            let t = Instant::now();
+            for window_start in (0..128).step_by(window_size){
+                res_2.push(extract_bits_range_unchecked(&s.to_be_bytes(), window_start as usize, window_size as usize));
+            }
+            let t = t.elapsed();
 
-        // u128 shr_assign
-        let t1 = Instant::now();
-        for _ in 0..100{
-            let _ = int >> rhs;
+            println!("Time extract coeff on scalar: {:?}", t);
+            let t = Instant::now();
+            for window_start in (0..128).step_by(window_size){    
+                res_1.push((int.wrapping_shr(window_start) % (1<<window_size)) as usize);
+            }
+            let t = t.elapsed();
+            println!("Time extract coeff on built-in: {:?}", t);
+
+            assert_eq!(res_1, res_2)
         }
-        let t1 = t1.elapsed();
-        int >>= rhs;
 
-        // Function shr_assign
-        let t2 = Instant::now();
-        for _ in 0..100{
-            shr_assign(&mut s, rhs);
-        }
-        let t2 = t2.elapsed();
-        let bytes = shr_assign(&mut s, rhs);
-        
-
-        println!("Compute 100 shift u128: {:?}", t1);
-        println!("Compute 100 shift Scalar: {:?}", t2);    
-
-        // check my implementation gives correct result
-        assert_eq!(Scalar::from_u128(int), Scalar::from_be_bytes(&bytes).unwrap());    
     }
-    
+
+
     #[test]
     fn utils_test_mul(){
         let size = 10_000;
@@ -656,7 +612,7 @@ mod tests {
     #[test]
     fn utils_test_eval(){
         
-        let d = 1<<8;
+        let d = 500;
         let mut p = PolynomialG1::with_capacity(d);
         for _ in 0..d{
             p.0.push(G1Projective::random(rand_core::OsRng{}));
