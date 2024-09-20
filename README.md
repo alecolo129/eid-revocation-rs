@@ -11,9 +11,9 @@ This repository contains the following packages:
 
 - `entities`: implements the main roles defined in the [Swiss Trust Infrastructure](https://github.com/e-id-admin/open-source-community/blob/main/discussion-paper-tech-proposal/discussion-paper-tech-proposal.md) (i.e., *Issuer*, *Holder*, and *Verifier*) making use of the cryptographic primitives provided by the `accumulator` package; 
 
-- `network`: provides basic server implementations for the *Base Registry* and the *Issuer*. It also contains wrappers around *Holder* and *Verifier* for conveniently querying the servers.
+- `network`: provides basic server implementations for the *Base Registry* and the *Issuer*. It also contains wrappers around *Holder* and *Verifier* for conveniently querying the servers;
 
-More details can be found in the respective folders.
+- `colombo_thesis.pdf`: my master's thesis on scalable and privacy-preserving revocation of verifiable credentials.
 
 ## Benches
 The `benches` folder contain the code that you can use to reproduce the benchmarks in Section 4 of my thesis. To run a single bench file, execute `cargo bench --bench [file-name]` without the `.rs` suffix.
