@@ -1,8 +1,6 @@
-use entities::issuer::Issuer;
 use accumulator::{
     Accumulator, UpMsg, Element, MembershipWitness, PublicKey, SecretKey
 };
-use blsful::inner_types::Scalar;
 use std::vec::Vec;
 use criterion::{
     criterion_group, criterion_main, Criterion,
@@ -13,15 +11,15 @@ use criterion::{
 
 //-------BENCHMARK PARAMETERS ------//
 
-const USERS: usize =  280_001; // Total number of elements originally added
-const UPDATES: [usize; 10] = [10_000, 20_000, 30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000, 100_000];
-const NUM_SAMPLES: usize = 30; // the number of samples for each benchmark
+const MAX_DELS_BATCH_VS_SEQ: usize = 10_000; // Maximum batch size used to compare batch vs single update
+const DELS_AGGR_VS_NO_AGGR: usize = 5_000; // Number of total deletions used to compare aggregation vs no aggregation
+const NUM_SAMPLES: usize = 30; // The number of samples for each benchmark
 
 
 
 criterion_group!(name = benches;
     config = Criterion::default().sample_size(NUM_SAMPLES);
-    targets = client_upd_single, client_upd_sequential, batch_update, batch_update_aggr
+    targets = batch_update_aggr, client_upd_single, client_upd_sequential, batch_update, 
 );
 criterion_main!(benches);
 
@@ -71,8 +69,7 @@ fn client_upd_sequential(c: &mut Criterion) {
         );
         println!("=================================================");
         
-        let mut upds: Vec<usize> = (0..20_001).step_by(200).collect();
-        upds[0]=1;
+        let upds: Vec<usize> = (0..=MAX_DELS_BATCH_VS_SEQ).step_by(200).map(|i| i.max(1)).collect();
 
         for upd in upds{
             println!("=================================================");
@@ -83,7 +80,7 @@ fn client_upd_sequential(c: &mut Criterion) {
 
             let acc = Accumulator::random(rand_core::OsRng{});
             let sk = SecretKey::new(None);
-            let items: Vec<Element> = (0..USERS).map(|i| Element::hash(&format!("User {i}").into_bytes())).collect();
+            let items: Vec<Element> = (0..=MAX_DELS_BATCH_VS_SEQ+1).map(|i| Element::hash(&format!("User {i}").into_bytes())).collect();
 
             // Takes the last user, gives them a witness
             let y = items.last().unwrap().clone();
@@ -95,12 +92,10 @@ fn client_upd_sequential(c: &mut Criterion) {
             let mut dels: Vec<UpMsg> = Vec::new();
             let mut acc_t = acc.clone();
 
-            let t = std::time::Instant::now();
             for &d in deletions{
                 let new_acc = acc_t.remove_assign(&sk, d);
                 dels.push(UpMsg(new_acc, d));
             }
-            println!("del: {:?}", t.elapsed());
             
             c.bench_function("SeqUpd", |b| {
                 b.iter(|| {
@@ -119,8 +114,7 @@ fn client_upd_sequential(c: &mut Criterion) {
 fn batch_update(c: &mut Criterion) {
     c.benchmark_group("client_batch_update");
     
-    let mut batch_client_updates: Vec<usize> = (0..20_001).step_by(200).collect();
-    batch_client_updates[0]=1;
+    let batch_client_updates: Vec<usize> = (0..=MAX_DELS_BATCH_VS_SEQ).step_by(200).map(|i| i.max(1)).collect();
 
     for num_ups in batch_client_updates{
         println!("=================================================");
@@ -132,7 +126,7 @@ fn batch_update(c: &mut Criterion) {
 
         // Creates an accumulator with the number of users
         let key = SecretKey::new(None);
-        let items: Vec<Element> = (0..USERS).map(|i| Element::hash(&format!("User {i}").into_bytes())).collect();
+        let items: Vec<Element> = (0..=MAX_DELS_BATCH_VS_SEQ+1).map(|i| Element::hash(&format!("User {i}").into_bytes())).collect();
         let mut acc = Accumulator::random(rand_core::OsRng {});
 
         // Takes the last user, gives them a witness
@@ -171,27 +165,28 @@ fn batch_update(c: &mut Criterion) {
 fn batch_update_aggr(c: &mut Criterion) {
     c.benchmark_group("client_batch_update");
 
-    let upd_size = 5_000;
-
-    let mut ms: Vec<usize> = (1..200).step_by(10).collect();
-    ms.append(&mut (200..=upd_size).step_by(200).collect());
+    let mut ms: Vec<usize> = (0..200).step_by(20).map(|i| i.max(1)).collect();
+    ms.append(&mut (200..=DELS_AGGR_VS_NO_AGGR).step_by(200).collect());
 
     // Creates an accumulator with the number of users
     let key = SecretKey::new(None);
-    let items: Vec<Element> = (0..upd_size).map(|i| Element::hash(&format!("User {i}").into_bytes())).collect();
     let mut acc = Accumulator::random(rand_core::OsRng {});
+    
+    // Creates one user more than the number of delete users
+    let items: Vec<Element> = (0..=DELS_AGGR_VS_NO_AGGR+1).map(|i| Element::hash(&format!("User {i}").into_bytes())).collect();
+   
 
     for m in ms{
         println!("=======================================================================================");
         println!(
             "=Batch Update with vs without aggregation with {} deletions, and batches of size {}=",
-            upd_size, m
+            DELS_AGGR_VS_NO_AGGR, m
         );
         println!("=======================================================================================");
         
         // Take the first user, gives him a witness
-        let y = items[0];
-        let mut witness = MembershipWitness::new(&y, acc, &key);
+        let e = items[0];
+        let mut witness = MembershipWitness::new(&e, acc, &key);
 
         // Creates lists of elements delete
         let deletions: Vec<&[Element]> = items[1..].chunks(m).collect();
@@ -204,16 +199,17 @@ fn batch_update_aggr(c: &mut Criterion) {
         // Batch update no aggregation
         c.bench_function("Batch update", |b| {
             b.iter(|| {
-                coefficients.iter().zip(&deletions).for_each(|(c,del)| {witness.batch_update(y, del, c).unwrap();});
+                coefficients.iter().zip(&deletions).for_each(|(c,del)| {witness.batch_update(e, del, c).unwrap();});
             })
         });
         
         // Batch update aggregation
         c.bench_function("Batch update with aggregation", |b| {
             b.iter(|| {
-                witness.batch_update_aggr(y, &deletions, coefficients.iter().map(|c| c.as_slice()).collect()).unwrap();
+                witness.batch_update_aggr(e, &deletions, coefficients.iter().map(|c| c.as_slice()).collect()).unwrap();
             })
         });
-        assert!(witness.batch_update_aggr_assign(y, &deletions, coefficients.iter().map(|c| c.as_slice()).collect()).unwrap().verify(y, PublicKey::from(&key), acc)); 
+
+        assert!(witness.batch_update_aggr_assign(e, &deletions, coefficients.iter().map(|c| c.as_slice()).collect()).unwrap().verify(e, PublicKey::from(&key), acc)); 
     }
 }
