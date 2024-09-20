@@ -15,15 +15,25 @@ rand_core = {version = "0.6.4", features = ["std"] }
 accumulator = { version = "0.1.0", path = "./accumulator" }
 entities = { version = "0.1.0", path = "./entities" }
 network = { version = "0.1.0", path = "./network" }
-agora-allosaurus-rs = { git = "https://github.com/hyperledger-labs/agora-allosaurus-rs" }
 rand = "0.8.5"
 
 [dev-dependencies]
+agora-allosaurus-rs = { git = "https://github.com/hyperledger-labs/agora-allosaurus-rs" }
 criterion = "0.4"
 serde_bare = "0.5"
 
 
 [[bench]]
 name = "updates"
+path = "benches/updates.rs"
 harness = false
 
+[[bench]]
+name = "verification"
+path = "benches/verification.rs"
+harness = false
+
+[[bench]]
+name = "issuer"
+path = "benches/issuer.rs"
+harness = false
