@@ -9,3 +9,23 @@ blsful = "2.5.7"
 merlin = "3.0.0"
 rand_core = "0.6.4"
 serde = "1.0.203"
+
+[dev-dependencies]
+agora-allosaurus-rs = { git = "https://github.com/hyperledger-labs/agora-allosaurus-rs" }
+criterion = "0.4"
+serde_bare = "0.5"
+
+[[bench]]
+name = "updates"
+path = "benches/updates.rs"
+harness = false
+
+[[bench]]
+name = "verification"
+path = "benches/verification.rs"
+harness = false
+
+[[bench]]
+name = "issuer"
+path = "benches/issuer.rs"
+harness = false
