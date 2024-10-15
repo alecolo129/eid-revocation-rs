@@ -155,14 +155,7 @@ pub fn window_mul(point: G1Projective, coefficients: Vec<Scalar>)-> Vec<G1Projec
         let bytes = &coeff.to_be_bytes();
         window_starts.iter().rev().for_each(|&w_start|{
 
-
             // Extract the `c` bits of the scalar for our current window
-            // Shift right to remove LSB, apply modulo 2 to remove MSB
-            //let mut bytes = shr_assign(&mut coeff, w_start);
-            //apply_modulo2(&mut bytes, c);
-            // Get the index on the precomputed table
-            //let index = scalar_to_usize(&bytes);
-
             let index = extract_bits_range_unchecked(bytes, w_start, c);
 
             if index!=0{
@@ -193,8 +186,8 @@ fn extract_bits_range_unchecked(data: &[u8; NUM_BITS+1>>3], window_start: usize,
         let bit_position = window_start - i;
         let byte_index = bit_position / 8;
         let bit_offset = bit_position % 8;
-        // Extract the bit and shift it to the correct position in the result
         
+        // Extract the bit and shift it to the correct position in the result
         let bit_value = data[byte_index]>>(7 - bit_offset) & 1;
         result = result | (bit_value as usize)<<i;
         
@@ -537,8 +530,7 @@ pub fn aggregate_eval_omega(omegas: Vec<PolynomialG1>, scalars: &Vec<Scalar>, e:
 
 #[cfg(test)]
 mod tests {
-    use core::time;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
     use group::{ff::PrimeField, Group};
 
     use super::*;
@@ -548,10 +540,10 @@ mod tests {
         // Pick random u128 
         let mut bytes = [0u8; 16];
         rand_core::OsRng{}.fill_bytes(&mut bytes);
-        let mut int = u128::from_be_bytes(bytes);
+        let int = u128::from_be_bytes(bytes);
 
         // Scalar representations of integer
-        let mut s = Scalar::from_u128(int); 
+        let s = Scalar::from_u128(int); 
 
         println!("scalar: {int}, bytes: {:?}", s.to_be_bytes());
    
@@ -559,8 +551,6 @@ mod tests {
         for window_size in 1..31{
             println!("\n### window_size: {window_size} ###\n");
             
-            let mut d_1 = Duration::from_micros(0);
-            let mut d_2 = Duration::from_micros(0);
             let mut res_1 = Vec::new();
             let mut res_2 = Vec::new();
             
