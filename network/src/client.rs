@@ -1,10 +1,13 @@
 use crate::{
-    base_registry::{PeriodicUpdate, Update, ACC_URL, BASE_REGISTRY_FRONT, PARAMS_URL, POLYS_URL, WIT_URL}, log_with_time, log_with_time_ln, server::{ISSUE_URL, WEBSERVER} 
+    base_registry::{
+        PeriodicUpdate, Update, ACC_URL, BASE_REGISTRY_FRONT, PARAMS_URL, POLYS_URL, WIT_URL,
+    },
+    log_with_time, log_with_time_ln,
+    server::{ISSUE_URL, WEBSERVER},
 };
 use accumulator::{proof::ProofParamsPublic, Accumulator};
 
 use entities::{holder::Holder, issuer::RevocationHandle, Updatable};
-
 
 pub struct Client;
 
@@ -33,7 +36,9 @@ impl Client {
         return Ok(pp);
     }
     /// Get proof accumulator from the Base Registry and update the input client's accumulator
-    pub async fn update_pp(client: &mut impl Updatable) -> Result<ProofParamsPublic, Box<dyn std::error::Error>> {
+    pub async fn update_pp(
+        client: &mut impl Updatable,
+    ) -> Result<ProofParamsPublic, Box<dyn std::error::Error>> {
         let pp = Client::ask_pp().await?;
         client.update_public_params(pp);
         return Ok(pp);
@@ -49,7 +54,9 @@ impl Client {
     }
 
     /// Get proof accumulator from the Base Registry and update the input client's accumulator
-    pub async fn update_accumulator(client: &mut impl Updatable) -> Result<Accumulator, Box<dyn std::error::Error>> {
+    pub async fn update_accumulator(
+        client: &mut impl Updatable,
+    ) -> Result<Accumulator, Box<dyn std::error::Error>> {
         let acc = Client::ask_accumulator().await?;
         client.update_accumulator(acc);
         return Ok(acc);
@@ -74,15 +81,16 @@ impl Client {
         let update_polys = updates.1;
 
         // Update holder witness and accumulator
-        log_with_time!("{} starts batch update of {} elements ...",
+        log_with_time!(
+            "{} starts batch update of {} elements ...",
             holder.get_pseudo(),
-            update_polys.iter().fold(0, |acc, el| acc + el.deletions.len())
+            update_polys
+                .iter()
+                .fold(0, |acc, el| acc + el.deletions.len())
         );
-        holder.batch_updates(update_polys.as_slice())?;
+        holder.update(update_polys.as_slice())?;
         holder.update_accumulator(new_acc);
-        log_with_time_ln!(
-            "Done.",
-        );
+        log_with_time_ln!("Done.",);
         return Ok(true);
     }
 

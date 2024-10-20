@@ -1,4 +1,4 @@
-use accumulator::{proof::ProofParamsPublic, Accumulator, MembershipWitness};
+use accumulator::{proof::ProofParamsPublic, Accumulator, MembershipWitness, UpdatePolynomials};
 use axum::{
     body::Bytes,
     extract::{Query, State},
@@ -8,7 +8,6 @@ use axum::{
     Router,
 };
 use blsful::inner_types::Scalar;
-use entities::issuer::UpdatePolynomials;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -50,9 +49,7 @@ struct AppState {
 async fn replace_public_params(State(state): State<AppState>, payload: Bytes) -> Response {
     match bincode::deserialize::<ProofParamsPublic>(&payload) {
         Ok(pp) => {
-            log_with_time_ln!(
-                "Base Registry: public params received"
-            );
+            log_with_time_ln!("Base Registry: public params received");
 
             // Replace public parameters
             state.pp.lock().unwrap().replace(pp);
@@ -70,12 +67,11 @@ async fn replace_public_params(State(state): State<AppState>, payload: Bytes) ->
     }
 }
 
-/// Uses the revocation updates contained in the request payload 
+/// Uses the revocation updates contained in the request payload
 /// to update the accumulator state and store new update polynomials
 async fn update_after_revocation(State(state): State<AppState>, payload: Bytes) -> Response {
     match bincode::deserialize::<crate::server::Update>(&payload) {
         Ok(update) => {
-
             // Get inputs
             let acc = update.0;
             let polys = update.1;
@@ -109,9 +105,7 @@ async fn update_after_revocation(State(state): State<AppState>, payload: Bytes) 
                 .unwrap()
                 .insert(acc_version, polys);
 
-            log_with_time_ln!( 
-               "Base Registry: state updated.",
-            );
+            log_with_time_ln!("Base Registry: state updated.",);
 
             return StatusCode::CREATED.into_response();
         }
@@ -119,15 +113,12 @@ async fn update_after_revocation(State(state): State<AppState>, payload: Bytes) 
     }
 }
 
-/// Returns all the update polynomials needed to get up-to-date starting from the accumulator id 
+/// Returns all the update polynomials needed to get up-to-date starting from the accumulator id
 /// that is passed in the payload
 async fn get_update_polys(State(state): State<AppState>, payload: Bytes) -> Response {
-
     match bincode::deserialize::<Scalar>(&payload) {
         Ok(acc_id) => {
-            log_with_time_ln!(
-                "Base Registry: get update polynomials called",
-            );
+            log_with_time_ln!("Base Registry: get update polynomials called",);
             match state.id_to_usize.lock().unwrap().get(&acc_id) {
                 Some(id) => {
                     // Fill vector of updates from input accumulator id
@@ -144,7 +135,12 @@ async fn get_update_polys(State(state): State<AppState>, payload: Bytes) -> Resp
                         return (StatusCode::NOT_FOUND, "No updates available").into_response();
                     }
 
-                    let acc = state.pp.lock().expect("Poisoned mutex").unwrap().get_accumulator();
+                    let acc = state
+                        .pp
+                        .lock()
+                        .expect("Poisoned mutex")
+                        .unwrap()
+                        .get_accumulator();
 
                     // Return updates
                     let payload = bincode::serialize(&Update(acc, poly_vec)).unwrap();
@@ -163,11 +159,7 @@ async fn get_update_polys(State(state): State<AppState>, payload: Bytes) -> Resp
 async fn upd_witnesses(State(state): State<AppState>, body: Bytes) -> Response {
     match bincode::deserialize::<HashMap<String, MembershipWitness>>(&body) {
         Ok(map) => {
-            
-            log_with_time!(
-                "Base Registry: {} new witnesses received",
-                map.len()
-            );
+            log_with_time!("Base Registry: {} new witnesses received", map.len());
 
             // Create new updated witnesses
             {
@@ -183,10 +175,8 @@ async fn upd_witnesses(State(state): State<AppState>, body: Bytes) -> Response {
                 *state.current_acc_version.lock().unwrap() = 0;
             }
 
-            log_with_time_ln!(
-                "Base Registry: finished updating state",
-            );
-            
+            log_with_time_ln!("Base Registry: finished updating state",);
+
             return StatusCode::OK.into_response();
         }
         Err(e) => {
@@ -196,14 +186,10 @@ async fn upd_witnesses(State(state): State<AppState>, body: Bytes) -> Response {
     }
 }
 
-
 async fn get_proof_params(State(state): State<AppState>) -> Response {
     match state.pp.lock().unwrap().to_owned() {
         Some(pp) => {
-            
-            log_with_time_ln!(
-                "Base Registry: get proof params called",
-            );
+            log_with_time_ln!("Base Registry: get proof params called",);
 
             return (StatusCode::OK, bincode::serialize(&pp).unwrap()).into_response();
         }
@@ -214,15 +200,13 @@ async fn get_proof_params(State(state): State<AppState>) -> Response {
 async fn get_accumulator(State(state): State<AppState>) -> Response {
     match state.pp.lock().unwrap().to_owned() {
         Some(pp) => {
-
-            log_with_time_ln!(
-                "Base Registry: get accumulator called",
-            );
+            log_with_time_ln!("Base Registry: get accumulator called",);
 
             return (
                 StatusCode::OK,
                 bincode::serialize(&pp.get_accumulator()).unwrap(),
-            ).into_response();
+            )
+                .into_response();
         }
         None => return (StatusCode::NOT_FOUND, "Accumulator not found").into_response(),
     }
@@ -231,25 +215,20 @@ async fn get_accumulator(State(state): State<AppState>) -> Response {
 async fn get_public_key(State(state): State<AppState>) -> Response {
     match state.pp.lock().unwrap().to_owned() {
         Some(pp) => {
-
-            log_with_time_ln!(
-                "Base Registry: get public key called",
-            );
+            log_with_time_ln!("Base Registry: get public key called",);
 
             return (
                 StatusCode::OK,
                 bincode::serialize(&pp.get_public_key()).unwrap(),
-            ).into_response()
+            )
+                .into_response();
         }
         None => return (StatusCode::NOT_FOUND, "Public Key not found").into_response(),
     }
 }
 
 /// Returns the most up-to-date witness for the holder's pseudonym passed in the payload
-async fn get_wit_update(
-    State(state): State<AppState>,
-    query: Query<ExampleParams>,
-) -> Response {
+async fn get_wit_update(State(state): State<AppState>, query: Query<ExampleParams>) -> Response {
     let ret: Vec<u8> = Vec::new();
     match state.wit.lock().expect("Poisoned mutex").get(&query.pseudo) {
         Some(&wit) => {
@@ -257,10 +236,15 @@ async fn get_wit_update(
                 "Base Registry: up-to-date witness request by {}",
                 query.pseudo
             );
-            let acc = state.pp.lock().expect("Poisoned mutex").unwrap().get_accumulator();
+            let acc = state
+                .pp
+                .lock()
+                .expect("Poisoned mutex")
+                .unwrap()
+                .get_accumulator();
             let bytes = bincode::serialize(&PeriodicUpdate(acc, wit)).unwrap();
             (StatusCode::OK, bytes).into_response()
-        },
+        }
         None => (StatusCode::UNAUTHORIZED, ret).into_response(),
     }
 }
@@ -278,7 +262,10 @@ pub async fn run() {
     let app = Router::new()
         .route(PARAMS_URL, get(get_proof_params).put(replace_public_params))
         .with_state(shared_state.clone())
-        .route(POLYS_URL, put(update_after_revocation).get(get_update_polys))
+        .route(
+            POLYS_URL,
+            put(update_after_revocation).get(get_update_polys),
+        )
         .with_state(shared_state.clone())
         .route(WIT_URL, get(get_wit_update).put(upd_witnesses))
         .with_state(shared_state.clone())
