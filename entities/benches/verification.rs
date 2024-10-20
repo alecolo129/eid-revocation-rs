@@ -16,8 +16,7 @@ criterion_group!(name = benches;
 );
 criterion_main!(benches);
 
-
-/** 
+/**
     Benchmarks for direct witness verification using the `VerifyWit_V` algorithm defined in page 25.
 */
 fn wit_ver(c: &mut Criterion) {
@@ -39,7 +38,7 @@ fn wit_ver(c: &mut Criterion) {
     });
 }
 
-/** 
+/**
     Benchmarks for zk profs of membership `MemProof_H`, and proof verification `MemVer_V` as defined in page 31.
     As a comparison, we bench the proof contained in Anoncreds Agora open-source implementaion.
 */
@@ -59,14 +58,14 @@ fn zk_proofs(c: &mut Criterion) {
     let mut proof = None;
     c.bench_function("MemProof", |b| {
         b.iter(|| {
-            // Benchmark proof generation 
+            // Benchmark proof generation
             proof = Some(hol.proof_membership(Some(pp)));
         })
     });
 
     c.bench_function("MemVer", |b| {
         b.iter(|| {
-            // Benchmark proof verification 
+            // Benchmark proof verification
             ver.verify(proof.unwrap());
         })
     });
