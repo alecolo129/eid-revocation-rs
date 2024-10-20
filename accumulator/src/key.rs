@@ -10,11 +10,10 @@ use group::GroupEncoding;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
-/// Represents x (secret key) 
+/// Represents x (secret key)
 #[derive(Clone, Debug, Zeroize, Serialize, Deserialize)]
 #[zeroize(drop)]
 pub struct SecretKey(pub Scalar);
-
 
 impl From<SecretKey> for [u8; 32] {
     fn from(s: SecretKey) -> Self {
@@ -43,11 +42,7 @@ impl SecretKey {
 
     /// Create a new secret key from optional `seed`
     pub fn new(seed: Option<&[u8]>) -> Self {
-        Self(generate_fr(
-            SALT,
-            seed, 
-            rand_core::OsRng {}
-        ))
+        Self(generate_fr(SALT, seed, rand_core::OsRng {}))
     }
 
     /// Takes a list of elements `e_1, ..., e_m` and returns `(e_1+x)*...*(e_m+x)`
@@ -62,51 +57,46 @@ impl SecretKey {
 
     /// Takes a list of elements `e_1, ..., e_m` and returns `1/((e_1+x)*...*(e_m+x))`
     pub fn batch_deletions(&self, deletions: &[Element]) -> Element {
-        Element(self.batch_additions(deletions).0.invert().expect("Inversion error: one of the deleted elements is outside accumulator domain"))
+        Element(
+            self.batch_additions(deletions).0.invert().expect(
+                "Inversion error: one of the deleted elements is outside accumulator domain",
+            ),
+        )
     }
 
-    /// Create the coefficients for the polynomial v(X), as in Section 4.4.2 of my thesis. 
-    /// 
+    /// Create the coefficients for the polynomial v(X), as in Section 4.4.2 of my thesis.
+    ///
     /// Returns an empty vector if the list of deletions is empty
-    pub fn gen_up_poly(
-        &self,
-        deletions: &[Element],
-    ) -> Vec<Element> {
-
+    pub fn gen_up_poly(&self, deletions: &[Element]) -> Vec<Element> {
         // Return empty poly if no deletion is batched
-        if deletions.is_empty(){
+        if deletions.is_empty() {
             return vec![];
         }
-   
+
         let m1 = -Scalar::ONE;
         let mut v = Polynomial::with_capacity(deletions.len());
-        let mut pt = Polynomial::with_capacity(deletions.len()-1);
-        
+        let mut pt = Polynomial::with_capacity(deletions.len() - 1);
+
         // v(X) = ∑^{m}_{s=1}{ ∏^{s}_{i=1} {e_i + x}^-1 ∏^{s-1}_{j=1} {e_j - X}
-        
+
         // Initialize both poly with first value (e_1+x)^-1
         let init = self.batch_deletions(&deletions[0..1]).0;
         pt.push(init);
         v.push(init);
-        
+
         for s in 1..deletions.len() {
             // ∏ i=1..s {e_i + x}^-1
-            pt *= self.batch_deletions(&deletions[s..s+1]).0;
+            pt *= self.batch_deletions(&deletions[s..s + 1]).0;
 
             // ∏ j=1...s-1 {e_j - X}
-            pt *= &[deletions[s-1].0, m1];
+            pt *= &[deletions[s - 1].0, m1];
             v += pt.clone();
         }
         v.0.into_iter().map(|b| Element(b)).collect()
     }
 
-
     /// Create the Batch Polynomial coefficients as by Mike Lodder's implementation
-    fn _create_coefficients(
-        &self,
-        additions: &[Element],
-        deletions: &[Element],
-    ) -> Vec<Element> {
+    fn _create_coefficients(&self, additions: &[Element], deletions: &[Element]) -> Vec<Element> {
         // vD(x) = ∑^{m}_{s=1}{ ∏ 1..s {yD_i + alpha}^-1 ∏ 1 ..s-1 {yD_j - x}
         let one = Scalar::ONE;
         let m1 = -one;
@@ -151,14 +141,11 @@ impl SecretKey {
         v_a.0.iter().map(|b| Element(*b)).collect()
     }
 
-
     /// Return the raw byte representation of the key
     pub fn to_bytes(&self) -> [u8; Self::BYTES] {
         self.0.to_be_bytes()
     }
 }
-
-
 
 /// Represents X = x*G_2 (public key) defined in page 25 of my thesis
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -204,7 +191,7 @@ impl TryFrom<&[u8; 96]> for PublicKey {
 
     fn try_from(bytes: &[u8; 96]) -> Result<Self, Self::Error> {
         let res = G2Affine::from_compressed(bytes).map(G2Projective::from);
-        if bool::from(res.is_some()){
+        if bool::from(res.is_some()) {
             Ok(Self(res.unwrap()))
         } else {
             Err(Error {
@@ -215,42 +202,39 @@ impl TryFrom<&[u8; 96]> for PublicKey {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
     use super::*;
+    use std::time::Instant;
 
     #[test]
     fn key_batch_test() {
         // Init parameters
         let key = SecretKey::new(None);
         let data = vec![Element::hash(b"value1"), Element::hash(b"value2")];
-    
+
         // Compute (e_1+x)*(e_2+x), ((e_1+x)*(e_2+x))^-1
         let add = key.batch_additions(data.as_slice());
         let del = key.batch_deletions(data.as_slice());
-        
+
         // Check del is inverse of add
-        let res = add.0*del.0;
+        let res = add.0 * del.0;
         assert_eq!(res, Scalar::ONE);
     }
 
-    #[test] 
+    #[test]
     #[should_panic]
     fn key_invalid_batch_test() {
-
         // Init parameters
         let key = SecretKey::new(None);
         let data = vec![Element(-key.0), Element::hash(b"value2")];
-    
+
         // Compute ((-x+x)*(e_2+x))^-1
         let _ = key.batch_deletions(data.as_slice());
     }
 
     #[test]
     fn key_coefficient_test() {
-
         const BATCH_SIZE: usize = 100;
 
         // Init params
@@ -258,7 +242,7 @@ mod tests {
         let mut data = Vec::with_capacity(BATCH_SIZE);
 
         // Create vector of deletions
-        (0..BATCH_SIZE).for_each(|i| {data.push(Element::hash(format!("Element {i}").as_bytes()))});
+        (0..BATCH_SIZE).for_each(|i| data.push(Element::hash(format!("Element {i}").as_bytes())));
 
         // Compute update coefficients with optimization
         let t1 = Instant::now();
@@ -271,14 +255,14 @@ mod tests {
         let t2 = t2.elapsed();
 
         // Check coeffiecients are the same
-        coefficients.iter().zip(coefficients2.iter()).for_each(|(&c_1, &c_2)|{
-            assert_eq!(c_1.0, -c_2.0);
-        });
-        
+        coefficients
+            .iter()
+            .zip(coefficients2.iter())
+            .for_each(|(&c_1, &c_2)| {
+                assert_eq!(c_1.0, -c_2.0);
+            });
 
         println!("Old coefficient generation: {:?}", t1);
         println!("New coefficient generation: {:?}", t2);
     }
-
-    
 }

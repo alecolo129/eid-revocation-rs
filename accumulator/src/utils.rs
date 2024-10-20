@@ -1,12 +1,11 @@
-use std::usize;
 use blsful::inner_types::*;
 use digest::{ExtendableOutput, Update, XofReader};
 use group::ff::{Field, PrimeField};
 use rand_core::{CryptoRng, RngCore};
 use sha3::Shake256;
+use std::usize;
 
-const NUM_BITS: usize = Scalar::NUM_BITS as usize; 
-
+const NUM_BITS: usize = Scalar::NUM_BITS as usize;
 
 /// Similar to https://tools.ietf.org/html/draft-irtf-cfrg-bls-signature-04#section-2.3
 /// info is left blank
@@ -59,10 +58,9 @@ impl PolynomialG1 {
     }
 
     /// Return the result of evaluating the polynomial with the specified point `x`. If the polynomial is empty return `None`.
-    /// 
+    ///
     /// NOTE: this function should only be used for testing, evaluation can be computed more efficiently with the `msm` function.
     pub fn evaluate(&self, x: &Scalar) -> Option<G1Projective> {
-
         if self.0.is_empty() {
             return None;
         }
@@ -76,24 +74,22 @@ impl PolynomialG1 {
         }
         Some(res)
     }
-    
+
     /// Returns all the powers of 'x` needed for evaluation of the poly
     /// e.g., 1, x, x^2, ..., x^d
-    fn compute_powers_for_eval(&self, x: &Scalar) -> Vec<Scalar>{
+    fn compute_powers_for_eval(&self, x: &Scalar) -> Vec<Scalar> {
         let mut ret = Vec::with_capacity(self.0.len());
         ret.push(Scalar::ONE);
-        for i in 1..self.0.len(){
-            ret.push(x*ret[i-1])
+        for i in 1..self.0.len() {
+            ret.push(x * ret[i - 1])
         }
         ret
     }
 
-
-        
-    /// Optimized implementation of multi-scalar multiplication adapted from ark-ec library. 
+    /// Optimized implementation of multi-scalar multiplication adapted from ark-ec library.
     pub fn msm(&self, x: &Scalar) -> Option<G1Projective> {
         /*
-            TODO: consider rewriting library using ark-ec and adopting their implementation of msm. 
+            TODO: consider rewriting library using ark-ec and adopting their implementation of msm.
         */
 
         // If the polynomial is empty we return None
@@ -107,7 +103,7 @@ impl PolynomialG1 {
         }
 
         // If the poly is small, evaluate directly
-        if *x==Scalar::ONE || self.0.len()<=64{
+        if *x == Scalar::ONE || self.0.len() <= 64 {
             return self.evaluate(x);
         }
 
@@ -117,66 +113,68 @@ impl PolynomialG1 {
         return msm(&self.0, &scalars);
     }
 
-    pub fn degree(&self)->usize{
-        self.0.len()-1
+    pub fn degree(&self) -> usize {
+        self.0.len() - 1
     }
 }
 
-/// Given a point P and a vector of coefficients [coeff_1, ..., coeff_n] 
+/// Given a point P and a vector of coefficients [coeff_1, ..., coeff_n]
 /// efficiently compute the vector [coeff_1*P...coeff_n*P]
-pub fn window_mul(point: G1Projective, coefficients: Vec<Scalar>)-> Vec<G1Projective>{
-    
-    if coefficients.is_empty(){
+pub fn window_mul(point: G1Projective, coefficients: Vec<Scalar>) -> Vec<G1Projective> {
+    if coefficients.is_empty() {
         return Vec::new();
     }
 
     // Get value for c
-    let c = match coefficients.len(){
+    let c = match coefficients.len() {
         size if size >= 32 => (usize::ilog2(size) * 69 / 100) as usize + 2,
-        _ => 3
+        _ => 3,
     };
 
     // Get indexes of msm windows
-    let num_bits = Scalar::BYTES*8 as usize;
+    let num_bits = Scalar::BYTES * 8 as usize;
     let window_starts: Vec<_> = (0..num_bits).step_by(c).collect();
 
     let zero = G1Projective::IDENTITY;
-    let mut table = vec![G1Projective::IDENTITY; (1<<c)-1];
-    
+    let mut table = vec![G1Projective::IDENTITY; (1 << c) - 1];
+
     // Efficiently precompute [P, 2P, 3P, ..., cP]
     table[0] = point;
-    for i in 1..table.len(){
-        table[i]=table[i-1]+point;
+    for i in 1..table.len() {
+        table[i] = table[i - 1] + point;
     }
- 
-    coefficients.iter().map(|&coeff| {        
-        // Result of the multiplication            
-        let mut res = zero;
-        let bytes = &coeff.to_be_bytes();
-        window_starts.iter().rev().for_each(|&w_start|{
 
-            // Extract the `c` bits of the scalar for our current window
-            let index = extract_bits_range_unchecked(bytes, w_start, c);
+    coefficients
+        .iter()
+        .map(|&coeff| {
+            // Result of the multiplication
+            let mut res = zero;
+            let bytes = &coeff.to_be_bytes();
+            window_starts.iter().rev().for_each(|&w_start| {
+                // Extract the `c` bits of the scalar for our current window
+                let index = extract_bits_range_unchecked(bytes, w_start, c);
 
-            if index!=0{
-                res+=table[index-1];
-            }
-            
-            if w_start !=0 {
-                for _ in 0..c {
-                    res = res.double();
+                if index != 0 {
+                    res += table[index - 1];
                 }
-            }
-        });
-        res
-    }).collect()
+
+                if w_start != 0 {
+                    for _ in 0..c {
+                        res = res.double();
+                    }
+                }
+            });
+            res
+        })
+        .collect()
 }
 
-
-fn extract_bits_range_unchecked(data: &[u8; NUM_BITS+1>>3], window_start: usize, window_size: usize) -> usize {
-   
-    
-    let window_start = NUM_BITS-window_start;
+fn extract_bits_range_unchecked(
+    data: &[u8; NUM_BITS + 1 >> 3],
+    window_start: usize,
+    window_size: usize,
+) -> usize {
+    let window_start = NUM_BITS - window_start;
     let window_size = usize::min(window_start, window_size);
 
     let mut result = 0usize;
@@ -186,16 +184,13 @@ fn extract_bits_range_unchecked(data: &[u8; NUM_BITS+1>>3], window_start: usize,
         let bit_position = window_start - i;
         let byte_index = bit_position / 8;
         let bit_offset = bit_position % 8;
-        
+
         // Extract the bit and shift it to the correct position in the result
-        let bit_value = data[byte_index]>>(7 - bit_offset) & 1;
-        result = result | (bit_value as usize)<<i;
-        
-        
+        let bit_value = data[byte_index] >> (7 - bit_offset) & 1;
+        result = result | (bit_value as usize) << i;
     }
     result
 }
-
 
 impl core::ops::AddAssign for PolynomialG1 {
     fn add_assign(&mut self, rhs: Self) {
@@ -220,10 +215,8 @@ impl core::ops::MulAssign<Scalar> for PolynomialG1 {
     }
 }
 
-
 /// Rewrite `scalars` in Non-Adjacent Form (NAF), using the input window size `c`.
 fn to_naf(scalars: &Vec<Scalar>, c: u32) -> Vec<Vec<i128>> {
-    
     let h = Scalar::NUM_BITS.div_ceil(c);
     let t = Scalar::ONE.shl((c * h - 1) as usize);
     let q_half = 1 << (c - 1);
@@ -243,14 +236,14 @@ fn to_naf(scalars: &Vec<Scalar>, c: u32) -> Vec<Vec<i128>> {
             let mut ret = 0;
             let bytes = &a.to_be_bytes();
             (0..(h as usize)).for_each(|j| {
-
                 // Extract the `c` bits correspondig to our window:
-                let mut a_j = extract_bits_range_unchecked(bytes, j*c as usize, c as usize) as i128;                
-               
+                let mut a_j =
+                    extract_bits_range_unchecked(bytes, j * c as usize, c as usize) as i128;
+
                 // Add remainder
                 a_j += ret;
 
-                if a_j <= q_half || j == (h - 1) as usize{
+                if a_j <= q_half || j == (h - 1) as usize {
                     bs.push(a_j);
                     ret = 0;
                 } else {
@@ -258,23 +251,21 @@ fn to_naf(scalars: &Vec<Scalar>, c: u32) -> Vec<Vec<i128>> {
                     ret = 1;
                 }
             });
-            
+
             // If a>(q^h)/2 => invert all coefficients
-            cond.then(|| bs.iter_mut().for_each(|b| {
-                *b = -(*b);
-            }
-            ));
+            cond.then(|| {
+                bs.iter_mut().for_each(|b| {
+                    *b = -(*b);
+                })
+            });
             bs
         })
         .collect()
 }
 
-
-
 /// Optimized implementation of multi-scalar multiplication adapted from ark-ec library.
 /// Given a list of coefficients `P_1,...,P_m` and scalars `c_1,...,c_m`, compute ∑^{m}_{i=1} c_i * P_i
 pub fn msm(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Projective> {
-
     // If the polynomial is empty we return None
     if coeff.is_empty() || coeff.len() != scalars.len() {
         return None;
@@ -286,38 +277,34 @@ pub fn msm(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Project
         _ => 3,
     };
 
-
     let scalars = to_naf(scalars, c as u32);
 
     // Get indexes of msm windows
-    let window_starts: Vec<_> = (0..Scalar::NUM_BITS.div_ceil(c as u32)).map(|i| i*(c as u32)).collect();
+    let window_starts: Vec<_> = (0..Scalar::NUM_BITS.div_ceil(c as u32))
+        .map(|i| i * (c as u32))
+        .collect();
     let zero = G1Projective::IDENTITY;
     let scalars_and_coeff_iter = scalars.iter().zip(coeff);
 
-
     // By rewriting coefficient in NAF form we can save half of the buckets, so we only have 2^(c-1) buckets.
-    let mut buckets = vec![zero; 1 << (c-1)];
+    let mut buckets = vec![zero; 1 << (c - 1)];
 
     let window_sums: Vec<_> = window_starts
         .into_iter()
         .enumerate()
-        .map(|(i,_)| {
+        .map(|(i, _)| {
             let mut res = zero;
 
             scalars_and_coeff_iter.clone().for_each(|(scalar, &base)| {
                 let index = scalar[i];
                 // If the scalar is non-zero, we update the corresponding
                 // bucket.
-                index.is_negative().then(||
-                    {
-                        buckets[index.abs() as usize -1] -=  base;
-                    }
-                );
-                index.is_positive().then(||
-                    {
-                        buckets[index.abs() as usize -1] +=  base;
-                    }
-                );
+                index.is_negative().then(|| {
+                    buckets[index.abs() as usize - 1] -= base;
+                });
+                index.is_positive().then(|| {
+                    buckets[index.abs() as usize - 1] += base;
+                });
             });
 
             // Compute sum for current window size
@@ -329,7 +316,7 @@ pub fn msm(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Project
 
             //Clean-up buckets for next iteration
             buckets.fill(zero);
-            
+
             res
         })
         .collect();
@@ -352,8 +339,6 @@ pub fn msm(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Project
                 }),
     )
 }
-
-
 
 /// A Polynomial for scalars
 #[derive(Default, Clone)]
@@ -443,7 +428,6 @@ impl core::ops::SubAssign<&[Scalar]> for Polynomial {
     }
 }
 
-
 impl core::ops::MulAssign for Polynomial {
     fn mul_assign(&mut self, rhs: Self) {
         *self *= rhs.0.as_slice();
@@ -487,39 +471,51 @@ impl core::ops::MulAssign<Scalar> for Polynomial {
     }
 }
 
-
-
-fn aggregate_d(omegas: &Vec<PolynomialG1>, scalars: &Vec<Scalar>, e: Scalar) -> Vec<Scalar>{
-    let max_deg = omegas.iter().max_by(|x, y| x.degree().cmp(&y.degree())).unwrap().degree();
+fn aggregate_d(omegas: &Vec<PolynomialG1>, scalars: &Vec<Scalar>, e: Scalar) -> Vec<Scalar> {
+    let max_deg = omegas
+        .iter()
+        .max_by(|x, y| x.degree().cmp(&y.degree()))
+        .unwrap()
+        .degree();
 
     // Pre-compute all required powers of the input element
     let mut powers = Vec::<Scalar>::with_capacity(max_deg);
     powers.push(Scalar::ONE);
-    (1..=max_deg).for_each(|i|{powers.push(powers[i-1]*e);});
-    
+    (1..=max_deg).for_each(|i| {
+        powers.push(powers[i - 1] * e);
+    });
+
     // Scalar vector
     let mut scalars_ret = Vec::new();
-    omegas.iter().enumerate().for_each(|(j, omega)|{
-        (0..=omega.degree()).for_each(|i|{
-            scalars_ret.push(scalars[j]*powers[i]);
+    omegas.iter().enumerate().for_each(|(j, omega)| {
+        (0..=omega.degree()).for_each(|i| {
+            scalars_ret.push(scalars[j] * powers[i]);
         })
     });
     scalars_ret
 }
 
-
-pub fn aggregate_eval_omega(omegas: Vec<PolynomialG1>, scalars: &Vec<Scalar>, e: Scalar)->Option<G1Projective>{
-    if omegas.len() == 0 || omegas.len()!= scalars.len(){
+pub fn aggregate_eval_omega(
+    omegas: Vec<PolynomialG1>,
+    scalars: &Vec<Scalar>,
+    e: Scalar,
+) -> Option<G1Projective> {
+    if omegas.len() == 0 || omegas.len() != scalars.len() {
         return None;
     }
-    let max_deg = omegas.iter().max_by(|x, y| x.degree().cmp(&y.degree())).unwrap().degree();
-
+    let max_deg = omegas
+        .iter()
+        .max_by(|x, y| x.degree().cmp(&y.degree()))
+        .unwrap()
+        .degree();
 
     // Pre-compute all required powers of the input element
     let mut powers = Vec::<Scalar>::with_capacity(max_deg);
     powers.push(Scalar::ONE);
-    (1..=max_deg).for_each(|i|{powers.push(powers[i-1]*e);});
-    
+    (1..=max_deg).for_each(|i| {
+        powers.push(powers[i - 1] * e);
+    });
+
     // Scalar vector
     let scalars = aggregate_d(&omegas, scalars, e);
 
@@ -530,86 +526,85 @@ pub fn aggregate_eval_omega(omegas: Vec<PolynomialG1>, scalars: &Vec<Scalar>, e:
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
     use group::{ff::PrimeField, Group};
+    use std::time::Instant;
 
     use super::*;
-    
+
     #[test]
-    fn utils_test_extract_bits_range(){
-        // Pick random u128 
+    fn utils_test_extract_bits_range() {
+        // Pick random u128
         let mut bytes = [0u8; 16];
-        rand_core::OsRng{}.fill_bytes(&mut bytes);
+        rand_core::OsRng {}.fill_bytes(&mut bytes);
         let int = u128::from_be_bytes(bytes);
 
         // Scalar representations of integer
-        let s = Scalar::from_u128(int); 
+        let s = Scalar::from_u128(int);
 
         println!("scalar: {int}, bytes: {:?}", s.to_be_bytes());
-   
+
         // Function extract bits
-        for window_size in 1..31{
+        for window_size in 1..31 {
             println!("\n### window_size: {window_size} ###\n");
-            
+
             let mut res_1 = Vec::new();
             let mut res_2 = Vec::new();
-            
+
             let t = Instant::now();
-            for window_start in (0..128).step_by(window_size){
-                res_2.push(extract_bits_range_unchecked(&s.to_be_bytes(), window_start as usize, window_size as usize));
+            for window_start in (0..128).step_by(window_size) {
+                res_2.push(extract_bits_range_unchecked(
+                    &s.to_be_bytes(),
+                    window_start as usize,
+                    window_size as usize,
+                ));
             }
             let t = t.elapsed();
 
             println!("Time extract coeff on scalar: {:?}", t);
             let t = Instant::now();
-            for window_start in (0..128).step_by(window_size){    
-                res_1.push((int.wrapping_shr(window_start) % (1<<window_size)) as usize);
+            for window_start in (0..128).step_by(window_size) {
+                res_1.push((int.wrapping_shr(window_start) % (1 << window_size)) as usize);
             }
             let t = t.elapsed();
             println!("Time extract coeff on built-in: {:?}", t);
 
             assert_eq!(res_1, res_2)
         }
-
     }
 
-
     #[test]
-    fn utils_test_mul(){
+    fn utils_test_mul() {
         let size = 10_000;
-        let v = G1Projective::random(rand_core::OsRng{});
+        let v = G1Projective::random(rand_core::OsRng {});
         let mut cs = Vec::with_capacity(size);
-        (0..size).for_each(|_| cs.push(Scalar::random(rand_core::OsRng{})));  
+        (0..size).for_each(|_| cs.push(Scalar::random(rand_core::OsRng {})));
 
         let t1 = Instant::now();
         let res = window_mul(v.clone(), cs.clone());
         let t1 = t1.elapsed();
 
-        
         let t2 = Instant::now();
-        let res2: Vec<G1Projective> = cs.iter().map(|c| v*c).collect();
+        let res2: Vec<G1Projective> = cs.iter().map(|c| v * c).collect();
         let t2 = t2.elapsed();
-        
-        for i in 0..size{
+
+        for i in 0..size {
             assert_eq!(res[i], res2[i]);
         }
-        
+
         println!("Compute {size} multiplications without DP: {:?}", t2);
         println!("Compute {size} multiplications with DP: {:?}", t1);
     }
 
-
     #[test]
-    fn utils_test_eval(){
-        
+    fn utils_test_eval() {
         let d = 500;
         let mut p = PolynomialG1::with_capacity(d);
-        for _ in 0..d{
-            p.0.push(G1Projective::random(rand_core::OsRng{}));
+        for _ in 0..d {
+            p.0.push(G1Projective::random(rand_core::OsRng {}));
         }
 
-        let x = Scalar::random(rand_core::OsRng{});
-        
+        let x = Scalar::random(rand_core::OsRng {});
+
         let t1 = Instant::now();
         let r1 = p.evaluate(&x).unwrap();
         let t1 = t1.elapsed();
@@ -619,60 +614,64 @@ mod tests {
         let t2 = t2.elapsed();
 
         println!("Evaluate degree {d} poly without optimization: {:?}", t1);
-        println!("Evaluate degree {d} poly using multi scalar multiplication: {:?}", t2);
+        println!(
+            "Evaluate degree {d} poly using multi scalar multiplication: {:?}",
+            t2
+        );
 
         assert_eq!(r1, r2);
-        
     }
 
-
     #[test]
-    fn utils_test_point_add(){
-
-
-        let xs: Vec<G1Projective> = (0..100).map(|_|G1Projective::random(rand_core::OsRng{})).collect();        
+    fn utils_test_point_add() {
+        let xs: Vec<G1Projective> = (0..100)
+            .map(|_| G1Projective::random(rand_core::OsRng {}))
+            .collect();
         let t1 = Instant::now();
-        xs.iter().for_each(|&x| {let _ = x.double();});
+        xs.iter().for_each(|&x| {
+            let _ = x.double();
+        });
         let t1 = t1.elapsed();
-        
+
         println!("100 add: {:?}", t1);
-        
     }
 
     #[test]
-    fn utils_test_scalar_mul(){
+    fn utils_test_scalar_mul() {
+        let xs: Vec<Scalar> = (0..100)
+            .map(|_| Scalar::random(rand_core::OsRng {}))
+            .collect();
+        let ys: Vec<Scalar> = (0..100)
+            .map(|_| Scalar::random(rand_core::OsRng {}))
+            .collect();
 
-
-        let xs: Vec<Scalar> = (0..100).map(|_|Scalar::random(rand_core::OsRng{})).collect();
-        let ys: Vec<Scalar> = (0..100).map(|_|Scalar::random(rand_core::OsRng{})).collect();
-        
         let t1 = Instant::now();
-        xs.iter().enumerate().for_each(|(i,&x)| {let _ = x*ys[i];});
+        xs.iter().enumerate().for_each(|(i, &x)| {
+            let _ = x * ys[i];
+        });
         let t1 = t1.elapsed();
-        
+
         println!("100 mul: {:?}", t1);
-        
     }
 
-
     #[test]
-    fn utils_test_window(){
-        
+    fn utils_test_window() {
         let d = 16_384;
-        let point =  G1Projective::random(rand_core::OsRng{});
+        let point = G1Projective::random(rand_core::OsRng {});
 
-        let scalars: Vec<Scalar> = (1..=d).map(|_| Scalar::random(rand_core::OsRng{})).collect();
-        
+        let scalars: Vec<Scalar> = (1..=d)
+            .map(|_| Scalar::random(rand_core::OsRng {}))
+            .collect();
+
         let t = Instant::now();
-        let a = window_mul(point, scalars.clone());         
+        let a = window_mul(point, scalars.clone());
         println!("Window mul: {:?}", t.elapsed());
 
         let mut a2 = Vec::with_capacity(scalars.len());
         let t = Instant::now();
-        scalars.iter().for_each(|s| a2.push(point*s));
+        scalars.iter().for_each(|s| a2.push(point * s));
         println!("Trivial: {:?}", t.elapsed());
 
         assert_eq!(a, a2);
     }
-
 }

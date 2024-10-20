@@ -19,7 +19,7 @@ pub struct Element(pub Scalar);
 
 impl Element {
     pub const BYTES: usize = 32;
-    
+
     /// Return the multiplicative identity element
     pub fn one() -> Self {
         Self(Scalar::ONE)
@@ -35,7 +35,6 @@ impl Element {
         Self(generate_fr(SALT, Some(d), rand_core::OsRng {}))
     }
 
-    
     /// Compute an element from a Merlin Transcript
     pub fn from_transcript(label: &'static [u8], transcript: &mut merlin::Transcript) -> Self {
         let mut okm = [0u8; 64];
@@ -43,13 +42,11 @@ impl Element {
         Self::hash(&okm)
     }
 
-
     /// Construct a random element
     pub fn random() -> Self {
         Self(generate_fr(SALT, None, rand_core::OsRng {}))
     }
 }
-
 
 impl Hash for Element {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -62,7 +59,6 @@ impl fmt::Display for Element {
         write!(f, "Element {{ {} }}", self.0)
     }
 }
-
 
 impl TryFrom<&[u8; 32]> for Element {
     type Error = Error;
@@ -128,7 +124,6 @@ impl TryFrom<&[u8; 48]> for Coefficient {
     }
 }
 
-
 /// Represents a Positive Bilinear Accumulator.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Accumulator(pub G1Projective);
@@ -136,7 +131,7 @@ pub struct Accumulator(pub G1Projective);
 impl Accumulator {
     pub const BYTES: usize = 48;
 
-    /// Creates a new random accumulator 
+    /// Creates a new random accumulator
     /// as in https://ieeexplore.ieee.org/abstract/document/9505229 Section IV.
     pub fn random(rng: impl RngCore + CryptoRng) -> Self {
         let s = generate_fr(SALT, None, rng);
@@ -144,48 +139,39 @@ impl Accumulator {
     }
 
     /// Using the trapdoor `key`, returns a new accumulator without the input element `deletion`
-    pub fn remove(&self, key: &SecretKey, deletion: Element) -> Accumulator{
+    pub fn remove(&self, key: &SecretKey, deletion: Element) -> Accumulator {
         self.clone().remove_assign(key, deletion)
     }
 
     /// Using the trapdoor `key`, modifyies the acumulator in-place, removing the input element `deletion`
-    pub fn remove_assign(&mut self, key: &SecretKey, deletion: Element) -> Accumulator{
+    pub fn remove_assign(&mut self, key: &SecretKey, deletion: Element) -> Accumulator {
         self.0 *= key.batch_deletions(&[deletion]).0;
         *self
     }
 
-    /// Using the trapdoor `key`, returns a new accumulator without the values in `deletions`. 
+    /// Using the trapdoor `key`, returns a new accumulator without the values in `deletions`.
     pub fn remove_elements(&self, key: &SecretKey, deletions: &[Element]) -> Accumulator {
         let mut a = self.clone();
         a.remove_elements_assign(key, deletions);
         a
     }
 
-    /// Using the trapdoor `key`, removes values in `deletions` 
+    /// Using the trapdoor `key`, removes values in `deletions`
     /// and updates the accumulator in-place.
-    pub fn remove_elements_assign(&mut self, key: &SecretKey, deletions: &[Element]){
+    pub fn remove_elements_assign(&mut self, key: &SecretKey, deletions: &[Element]) {
         // V_{t+1} = V_{t}*((x+e_1)*...*(x+e_n))^-1
         self.0 *= key.batch_deletions(deletions).0;
     }
 
-    /// Given the accumulator trapdoor `key` and a list of deletions `deletions`, 
+    /// Given the accumulator trapdoor `key` and a list of deletions `deletions`,
     /// returns the list of update coefficients for polynomial `Ω(X)` without updating the accumulator.
-    pub fn update(
-        &self,
-        key: &SecretKey,
-        deletions: &[Element]
-    ) -> Vec<Coefficient>{
+    pub fn update(&self, key: &SecretKey, deletions: &[Element]) -> Vec<Coefficient> {
         self.clone().update_assign(key, deletions)
     }
 
-    /// Given the accumulator trapdoor `key` and a list of deletions `deletions`, 
+    /// Given the accumulator trapdoor `key` and a list of deletions `deletions`,
     /// performs a batch update of the accumulator returning the list of update coefficients.
-    pub fn update_assign(
-        &mut self,
-        key: &SecretKey,
-        deletions: &[Element],
-    ) -> Vec<Coefficient> {
-
+    pub fn update_assign(&mut self, key: &SecretKey, deletions: &[Element]) -> Vec<Coefficient> {
         // See page 34 of my thesis (eq. 4.4, 4.7)
 
         // d = ((x+e_1)*...*(x+e_m))^-1
@@ -203,8 +189,8 @@ impl Accumulator {
     }
 
     /// Generate accumulator id
-    pub fn get_id(&self) -> Scalar{
-        return generate_fr(SALT, Some(&self.to_bytes()), rand_core::OsRng{})
+    pub fn get_id(&self) -> Scalar {
+        return generate_fr(SALT, Some(&self.to_bytes()), rand_core::OsRng {});
     }
 
     /// Convert accumulator to bytes
@@ -216,11 +202,7 @@ impl Accumulator {
 
     /// Performs a batch deletion as described on page 11, section 5 in
     /// https://eprint.iacr.org/2020/777.pdf. Unoptimized version, maintained only for testing
-    fn _update_assign(
-        &mut self,
-        key: &SecretKey,
-        deletions: &[Element],
-    ) -> Vec<Coefficient> {
+    fn _update_assign(&mut self, key: &SecretKey, deletions: &[Element]) -> Vec<Coefficient> {
         let d = key.batch_deletions(deletions);
         let coefficients = key
             .gen_up_poly(deletions)
@@ -230,9 +212,7 @@ impl Accumulator {
         self.0 *= d.0;
         coefficients
     }
-
 }
-
 
 impl fmt::Display for Accumulator {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -274,27 +254,28 @@ impl Default for Accumulator {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-    use group::ff::Field;
     use crate::{MembershipWitness, PublicKey};
+    use group::ff::Field;
+    use std::time::Instant;
 
     use super::*;
 
     // Single removal
     #[test]
-    fn acc_single_remove_test(){
-        // Generate params        
-        let (key, mut acc) = (SecretKey::new(Some(b"Key{i}")), Accumulator::random(rand_core::OsRng{}));
+    fn acc_single_remove_test() {
+        // Generate params
+        let (key, mut acc) = (
+            SecretKey::new(Some(b"Key{i}")),
+            Accumulator::random(rand_core::OsRng {}),
+        );
         let pub_key = PublicKey::from(&key);
 
         // Get witness for random element
-        let el  = Element::random();
+        let el = Element::random();
         let wit = MembershipWitness::new(&el, acc, &key);
-        
+
         // Revoke first element
         let t = Instant::now();
         acc.remove_assign(&key, el);
@@ -307,66 +288,72 @@ mod tests {
 
     // Batch removals
     #[test]
-    fn acc_batch_remove_test(){
+    fn acc_batch_remove_test() {
         const BATCH_DELETIONS: usize = 1_000;
-        // Generate params        
-        let (key, mut acc) = (SecretKey::new(Some(b"Key{i}")), Accumulator::random(rand_core::OsRng{}));
+        // Generate params
+        let (key, mut acc) = (
+            SecretKey::new(Some(b"Key{i}")),
+            Accumulator::random(rand_core::OsRng {}),
+        );
         let pub_key = PublicKey::from(&key);
 
         // Get elements to delete and respective witnesses
-        let (mut deletions, mut witnesses) = (Vec::with_capacity(BATCH_DELETIONS), Vec::with_capacity(BATCH_DELETIONS));
+        let (mut deletions, mut witnesses) = (
+            Vec::with_capacity(BATCH_DELETIONS),
+            Vec::with_capacity(BATCH_DELETIONS),
+        );
         (0..BATCH_DELETIONS).for_each(|i| {
             let el = Element::hash(format!("Element {i}").as_bytes());
-            deletions.push(el); witnesses.push(MembershipWitness::new(&el, acc, &key));
+            deletions.push(el);
+            witnesses.push(MembershipWitness::new(&el, acc, &key));
         });
-        
+
         // Revoke all elements
         let t = Instant::now();
         acc.remove_elements_assign(&key, &deletions.as_slice());
         let t = t.elapsed();
 
         // Check witnesses do not verify
-        witnesses.iter().enumerate().for_each(|(i, wit)| {assert!(!wit.verify(deletions[i], pub_key, acc));});
+        witnesses.iter().enumerate().for_each(|(i, wit)| {
+            assert!(!wit.verify(deletions[i], pub_key, acc));
+        });
         println!("Time for deleting {} elements: {:?}", BATCH_DELETIONS, t);
     }
-
-
 
     //Batch Update
     #[test]
     fn acc_batch_update_test() {
-
         const CREDENTIAL_SPACE: usize = 1_010;
         const BATCH_DELETIONS: usize = 1_000;
 
-        // Generate params        
+        // Generate params
         let key = SecretKey::new(Some(b"Key{i}"));
-        let mut a = Accumulator::random(rand_core::OsRng{});
+        let mut a = Accumulator::random(rand_core::OsRng {});
         let mut a2 = a.clone();
-        
+
         // Create users
         let mut users = Vec::with_capacity(CREDENTIAL_SPACE);
         users.push(Element::hash("User".as_bytes()));
         (1..CREDENTIAL_SPACE).for_each(|i| {
-            users.push(Element(users[i-1].0.double()));
+            users.push(Element(users[i - 1].0.double()));
         });
 
         let revoked = &users[..BATCH_DELETIONS];
-        
+
         let t1 = Instant::now();
         let coeff = a.update_assign(&key, revoked);
         let t1 = t1.elapsed();
 
-        
         let t2 = Instant::now();
         let coeff2 = a2._update_assign(&key, revoked);
         let t2 = t2.elapsed();
 
         assert_eq!(coeff, coeff2);
 
-        println!("Time to compute update poly omega for {BATCH_DELETIONS} deletions: {:?}", t2);
+        println!(
+            "Time to compute update poly omega for {BATCH_DELETIONS} deletions: {:?}",
+            t2
+        );
         println!("Time to compute updates poly omega for {BATCH_DELETIONS} deletions with windowed multiplication: {:?}", t1);
     }
-
-   
 }
