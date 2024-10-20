@@ -1,4 +1,4 @@
-use accumulator::{Accumulator, Element, MembershipWitness, PublicKey, SecretKey, UpMsg};
+use accumulator::{Accumulator, Coefficient, Element, MembershipWitness, PublicKey, SecretKey, UpMsg};
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::vec::Vec;
 
@@ -205,7 +205,7 @@ fn batch_update_aggr(c: &mut Criterion) {
                     .update(
                         e,
                         &deletions,
-                        coefficients.iter().map(|c| c.as_slice()).collect(),
+                        &coefficients.iter().map(|c| c.as_slice()).collect::<Vec<&[Coefficient]>>().as_slice(),
                     )
                     .unwrap();
             })
@@ -215,7 +215,7 @@ fn batch_update_aggr(c: &mut Criterion) {
             .update_assign(
                 e,
                 &deletions,
-                coefficients.iter().map(|c| c.as_slice()).collect()
+                &coefficients.iter().map(|c| c.as_slice()).collect::<Vec<&[Coefficient]>>().as_slice()
             )
             .unwrap()
             .verify(e, PublicKey::from(&key), acc));
