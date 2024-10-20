@@ -102,6 +102,12 @@ impl From<Coefficient> for G1Projective {
     }
 }
 
+impl From<Accumulator> for Coefficient {
+    fn from(acc: Accumulator) -> Self {
+        Self(acc.0)
+    }
+}
+
 impl From<G1Projective> for Coefficient {
     fn from(g: G1Projective) -> Self {
         Self(g)
