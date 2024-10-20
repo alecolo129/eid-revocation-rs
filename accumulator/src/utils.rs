@@ -3,7 +3,9 @@ use digest::{ExtendableOutput, Update, XofReader};
 use group::ff::{Field, PrimeField};
 use rand_core::{CryptoRng, RngCore};
 use sha3::Shake256;
-use std::usize;
+use std::{ops::Deref, usize};
+
+use crate::Coefficient;
 
 const NUM_BITS: usize = Scalar::NUM_BITS as usize;
 
@@ -43,6 +45,13 @@ pub const SALT: &[u8] = b"KB-VB-ACC-HASH-SALT-";
 /// A Polynomial for Points
 #[derive(Default, Clone, Debug)]
 pub struct PolynomialG1(pub Vec<G1Projective>);
+
+impl Deref for PolynomialG1{
+    type Target = Vec<G1Projective>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl PolynomialG1 {
     #[cfg(any(feature = "std", feature = "alloc"))]
@@ -120,7 +129,7 @@ impl PolynomialG1 {
 
 /// Given a point P and a vector of coefficients [coeff_1, ..., coeff_n]
 /// efficiently compute the vector [coeff_1*P...coeff_n*P]
-pub fn window_mul(point: G1Projective, coefficients: Vec<Scalar>) -> Vec<G1Projective> {
+pub fn window_mul <T: Into<Scalar> + Copy> (point: G1Projective, coefficients: &[T]) -> Vec<G1Projective> {
     if coefficients.is_empty() {
         return Vec::new();
     }
@@ -149,7 +158,7 @@ pub fn window_mul(point: G1Projective, coefficients: Vec<Scalar>) -> Vec<G1Proje
         .map(|&coeff| {
             // Result of the multiplication
             let mut res = zero;
-            let bytes = &coeff.to_be_bytes();
+            let bytes = &coeff.into().to_be_bytes();
             window_starts.iter().rev().for_each(|&w_start| {
                 // Extract the `c` bits of the scalar for our current window
                 let index = extract_bits_range_unchecked(bytes, w_start, c);
@@ -192,6 +201,22 @@ fn extract_bits_range_unchecked(
     result
 }
 
+impl From<&[Coefficient]> for PolynomialG1{
+    fn from(value: &[Coefficient]) -> Self {
+        Self(
+            value.into_iter().map(G1Projective::from).collect()
+        )
+    }    
+}
+
+impl From<Vec<Coefficient>> for PolynomialG1{
+    fn from(value: Vec<Coefficient>) -> Self {
+        Self(
+            value.into_iter().map(G1Projective::from).collect()
+        )
+    }    
+}
+
 impl core::ops::AddAssign for PolynomialG1 {
     fn add_assign(&mut self, rhs: Self) {
         let min_len = core::cmp::min(self.0.len(), rhs.0.len());
@@ -216,7 +241,7 @@ impl core::ops::MulAssign<Scalar> for PolynomialG1 {
 }
 
 /// Rewrite `scalars` in Non-Adjacent Form (NAF), using the input window size `c`.
-fn to_naf(scalars: &Vec<Scalar>, c: u32) -> Vec<Vec<i128>> {
+fn to_naf(scalars: &[Scalar], c: u32) -> Vec<Vec<i128>> {
     let h = Scalar::NUM_BITS.div_ceil(c);
     let t = Scalar::ONE.shl((c * h - 1) as usize);
     let q_half = 1 << (c - 1);
@@ -265,7 +290,7 @@ fn to_naf(scalars: &Vec<Scalar>, c: u32) -> Vec<Vec<i128>> {
 
 /// Optimized implementation of multi-scalar multiplication adapted from ark-ec library.
 /// Given a list of coefficients `P_1,...,P_m` and scalars `c_1,...,c_m`, compute ∑^{m}_{i=1} c_i * P_i
-pub fn msm(coeff: &Vec<G1Projective>, scalars: &Vec<Scalar>) -> Option<G1Projective> {
+pub fn msm(coeff: &[G1Projective], scalars: &[Scalar]) -> Option<G1Projective> {
     // If the polynomial is empty we return None
     if coeff.is_empty() || coeff.len() != scalars.len() {
         return None;
@@ -471,7 +496,7 @@ impl core::ops::MulAssign<Scalar> for Polynomial {
     }
 }
 
-fn aggregate_d(omegas: &Vec<PolynomialG1>, scalars: &Vec<Scalar>, e: Scalar) -> Vec<Scalar> {
+fn aggregate_d(omegas: &[PolynomialG1], scalars: &[Scalar], e: Scalar) -> Vec<Scalar> {
     let max_deg = omegas
         .iter()
         .max_by(|x, y| x.degree().cmp(&y.degree()))
@@ -497,7 +522,7 @@ fn aggregate_d(omegas: &Vec<PolynomialG1>, scalars: &Vec<Scalar>, e: Scalar) -> 
 
 pub fn aggregate_eval_omega(
     omegas: Vec<PolynomialG1>,
-    scalars: &Vec<Scalar>,
+    scalars: &[Scalar],
     e: Scalar,
 ) -> Option<G1Projective> {
     if omegas.len() == 0 || omegas.len() != scalars.len() {
@@ -580,7 +605,7 @@ mod tests {
         (0..size).for_each(|_| cs.push(Scalar::random(rand_core::OsRng {})));
 
         let t1 = Instant::now();
-        let res = window_mul(v.clone(), cs.clone());
+        let res = window_mul(v.clone(), cs.clone().as_slice());
         let t1 = t1.elapsed();
 
         let t2 = Instant::now();
@@ -664,7 +689,7 @@ mod tests {
             .collect();
 
         let t = Instant::now();
-        let a = window_mul(point, scalars.clone());
+        let a = window_mul(point, scalars.as_slice());
         println!("Window mul: {:?}", t.elapsed());
 
         let mut a2 = Vec::with_capacity(scalars.len());

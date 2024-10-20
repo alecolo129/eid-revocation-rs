@@ -167,13 +167,7 @@ impl MembershipWitness {
         d_e = t.unwrap();
 
         // Build polynomial from coefficient list
-        let poly = PolynomialG1(
-            omega
-                .as_ref()
-                .iter()
-                .map(|c| c.0)
-                .collect::<Vec<G1Projective>>(),
-        );
+        let poly: PolynomialG1 = omega.into();
 
         // Compute Ω(e) using Pippenger's approach for Multi Scalar Multiplication
         if let Some(v) = poly.msm(&e.0) {
@@ -194,8 +188,8 @@ impl MembershipWitness {
     pub fn update(
         &mut self,
         e: Element,
-        deletions: &Vec<&[Element]>,
-        omegas: Vec<&[Coefficient]>,
+        deletions: &[&[Element]],
+        omegas: &[&[Coefficient]],
     ) -> Result<MembershipWitness, Error> {
         return self.clone().update_assign(e, deletions, omegas);
     }
@@ -208,19 +202,14 @@ impl MembershipWitness {
     pub fn update_assign(
         &mut self,
         e: Element,
-        deletions: &Vec<&[Element]>,
-        omegas: Vec<&[Coefficient]>,
+        deletions: &[&[Element]],
+        omegas: &[&[Coefficient]],
     ) -> Result<MembershipWitness, Error> {
         // Build update polynomials using omega coefficients
         let coeff = omegas
             .into_iter()
-            .map(|omega| {
-                PolynomialG1(
-                    omega
-                        .into_iter()
-                        .map(|&coeff| coeff.into())
-                        .collect::<Vec<G1Projective>>(),
-                )
+            .map(|&omega| {
+                omega.into()            
             })
             .collect::<Vec<PolynomialG1>>();
 
@@ -229,7 +218,7 @@ impl MembershipWitness {
 
         // d_{t -> t+n}(e) = ∏^{t+m}_{i=t+1} d_i(e) = d_{t+1}(e) * a_{t+n}
         let mut d_d: Scalar =
-            scalars.last().unwrap() * dd_eval(&vec![deletions.last().unwrap()], e.0);
+            scalars.last().unwrap() * dd_eval(&[deletions.last().unwrap()], e.0);
         let t = d_d.invert();
 
         // If this fails, then 'e' was removed
@@ -294,20 +283,15 @@ impl MembershipWitness {
         // dD(x) = ∏ 1..m (yD_i - x)
         let mut d_d = dd_eval(&vec![deletions], y.0);
 
+        
+        // If inversion fails, then y was removed
         let t = d_d.invert();
-        // If this fails, then this value was removed
         if bool::from(t.is_none()) {
             return Err(Error::from_msg(1, "no inverse exists"));
         }
         d_d = t.unwrap();
 
-        let poly = PolynomialG1(
-            coefficients
-                .as_ref()
-                .iter()
-                .map(|c| c.0)
-                .collect::<Vec<G1Projective>>(),
-        );
+        let poly: PolynomialG1 = coefficients.into();
 
         // Compute〈Υy,Ω〉using direct evaluation
         if let Some(v) = poly.evaluate(&y.0) {
@@ -322,7 +306,7 @@ impl MembershipWitness {
 }
 
 /// Evaluates poly d(e) = ∏ 1..m (e_i - e)
-fn dd_eval(values: &Vec<&[Element]>, e: Scalar) -> Scalar {
+fn dd_eval(values: &[&[Element]], e: Scalar) -> Scalar {
     values
         .iter()
         .map(|value| {
@@ -338,7 +322,7 @@ fn dd_eval(values: &Vec<&[Element]>, e: Scalar) -> Scalar {
 ///
 /// Uses the list of batch deletions `batch_dels`, and the element `e`
 /// to compute the list of evaluatations `a_{t+1},...,a_{t+n}` as by page 39 of my thesis.
-fn dd_evals(batch_dels: &Vec<&[Element]>, e: Scalar) -> Vec<Scalar> {
+fn dd_evals(batch_dels: &[&[Element]], e: Scalar) -> Vec<Scalar> {
     let mut res = Vec::with_capacity(batch_dels.len());
 
     //`[1, d_{t+2}(e), d_{t+2}(e)*d_{t+3}(e),...,∏^{t+n}_{i=t+2} d_i(e)]`
@@ -478,7 +462,7 @@ mod tests {
         wit.update_assign(
             e,
             &deletions,
-            coefficients.iter().map(|v| v.as_slice()).collect(),
+            &coefficients.iter().map(Vec::as_slice).collect::<Vec<&[Coefficient]>>().as_slice(),
         )
         .expect("Error when evaluating poly");
         let t1 = t1.elapsed();

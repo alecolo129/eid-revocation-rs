@@ -11,8 +11,7 @@ use core::{
 use group::GroupEncoding;
 use rand_core::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::hash::{Hash, Hasher};
-
+use std::{hash::{Hash, Hasher}, ops::Deref};
 /// An element in the accumulator
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Element(pub Scalar);
@@ -51,6 +50,19 @@ impl Element {
 impl Hash for Element {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.to_be_bytes().hash(state)
+    }
+}
+
+impl From<Element> for Scalar{
+    fn from(value: Element) -> Self {
+        value.0
+    }
+}
+
+impl Deref for Element{
+    type Target = Scalar;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -93,6 +105,13 @@ impl Coefficient {
 impl fmt::Display for Coefficient {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "Coefficient {{ {} }}", self.0)
+    }
+}
+
+
+impl From<&Coefficient> for G1Projective {
+    fn from(c: &Coefficient) -> Self {
+        G1Projective::from(*c)
     }
 }
 
@@ -186,7 +205,7 @@ impl Accumulator {
         let coefficients = key.gen_up_poly(deletions);
 
         // Optimized evaluation of [c_0*V, ..., c_{m-1}*V] using window multiplication
-        let coefficients = window_mul(self.0, coefficients.into_iter().map(|c| c.0).collect());
+        let coefficients = window_mul(self.0, coefficients.as_slice());
 
         // V_{t+1} = V_t*d
         self.0 *= d.0;
