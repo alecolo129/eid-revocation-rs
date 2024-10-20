@@ -1,27 +1,24 @@
 use merlin::Transcript;
 
-use accumulator::{
-    accumulator::Accumulator, proof::{self, Proof, ProofParamsPublic}
-};
 use crate::Updatable;
+use accumulator::{
+    accumulator::Accumulator,
+    proof::{self, Proof, ProofParamsPublic},
+};
 
 #[derive(Debug)]
 pub struct Verifier {
-    params: ProofParamsPublic
-} 
-
+    params: ProofParamsPublic,
+}
 
 impl Verifier {
-
     /// Creates a new `Verifier` instance, associated with the input proof parameters `params`.
     pub fn new(params: ProofParamsPublic) -> Self {
-        Self {
-            params
-        }
-    }  
-    
+        Self { params }
+    }
+
     /// Verifies the input membership proof `mem_proof` against the stored proof parameters.
-    pub fn verify(&self, mem_proof: Proof)->bool{
+    pub fn verify(&self, mem_proof: Proof) -> bool {
         let mut transcript = Transcript::new(proof::PROOF_LABEL);
         self.params.add_to_transcript(&mut transcript);
 
@@ -30,8 +27,7 @@ impl Verifier {
     }
 }
 
-impl Updatable for Verifier{
-
+impl Updatable for Verifier {
     /// Update the verifier's public parameters with the new parameters `new_pp`.
     fn update_public_params(&mut self, new_pp: ProofParamsPublic) {
         self.params = new_pp;
@@ -46,8 +42,7 @@ impl Updatable for Verifier{
 #[cfg(test)]
 mod tests {
     use crate::{Holder, Issuer, Updatable, Verifier};
-    use std::time::Instant; 
-
+    use std::time::Instant;
 
     #[test]
     fn verifier_proof_succeed() {
@@ -57,21 +52,18 @@ mod tests {
         let rh = issuer.add("holder1").unwrap();
         let params = issuer.get_proof_params();
         let holder = Holder::new("holder1", rh, params);
-        
+
         // Init Verifier
         let ver = Verifier::new(params);
-        
+
         // Compute proof
         let proof = holder.proof_membership(None);
-        
+
         // Verify proof
         let t = Instant::now();
         assert!(ver.verify(proof));
         let t = t.elapsed();
-        println!(
-            "Valid proof - verification time: {:?}",
-            t
-        )
+        println!("Valid proof - verification time: {:?}", t)
     }
 
     #[test]
@@ -82,13 +74,12 @@ mod tests {
         let rh = issuer.add("holder1").unwrap();
         let params = issuer.get_proof_params();
         let holder = Holder::new("holder1", rh, params);
-        
+
         // Init Verifier
         let mut ver = Verifier::new(params);
 
-
         // Delete holder
-        issuer.revoke_instant(&String::from("holder1"));
+        issuer.revoke(&String::from("holder1"));
 
         // Update verifier
         let new_acc = issuer.get_accumulator();
@@ -96,14 +87,11 @@ mod tests {
 
         // Compute proof
         let proof = holder.proof_membership(None);
-        
+
         // Verify proof is not valid
         let t = Instant::now();
         assert!(!ver.verify(proof));
         let t = t.elapsed();
-        println!(
-            "Non valid proof - verification time: {:?}",
-            t
-        )
+        println!("Non valid proof - verification time: {:?}", t)
     }
 }

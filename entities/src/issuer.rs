@@ -1,10 +1,5 @@
 use accumulator::{
-    accumulator::{Accumulator, Element},
-    key::{PublicKey, SecretKey},
-    proof::ProofParamsPublic,
-    window_mul,
-    witness::{MembershipWitness, UpdatePolynomials},
-    UpMsg,
+    accumulator::{Accumulator, Element}, key::{PublicKey, SecretKey}, proof::ProofParamsPublic, window_mul, witness::{MembershipWitness, UpdatePolynomials}, Coefficient, UpMsg
 };
 
 use blsful::inner_types::{G1Projective, Scalar};
@@ -60,13 +55,13 @@ impl RevocationHandle {
     /// ```
     pub fn update_assign(
         &mut self,
-        update_polys: &Vec<UpdatePolynomials>,
+        update_polys: &[UpdatePolynomials],
     ) -> Result<MembershipWitness, accumulator::Error> {
-        let (deletions, omegas) = update_polys
+        let (deletions, omegas): (Vec<&[Element]>, Vec<&[Coefficient]>) = update_polys
             .iter()
             .map(|poly| (poly.deletions.as_slice(), poly.omegas.as_slice()))
             .unzip();
-        self.wit.update_assign(self.elem, &deletions, omegas)
+        self.wit.update_assign(self.elem, deletions.as_slice(), omegas.as_slice())
     }
 
     /// Sequentially updates `self.wit` executing the single update algorithm over the input instances of `UpMsg`.
@@ -461,7 +456,7 @@ impl Issuer {
             self.witnesses
                 .iter()
                 .map(|(_, rh)| self.acc_sk.batch_deletions(&[rh.get_elem()]).0)
-                .collect(),
+                .collect::<Vec<_>>().as_slice(),
         );
 
         self.witnesses

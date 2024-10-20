@@ -1,12 +1,10 @@
-pub mod issuer;
 pub mod holder;
+pub mod issuer;
 pub mod verifier;
 
-
 pub use holder::*;
-pub use verifier::*;
 pub use issuer::*;
-
+pub use verifier::*;
 
 /// Client trait for updating public parameters
 pub trait Updatable {
