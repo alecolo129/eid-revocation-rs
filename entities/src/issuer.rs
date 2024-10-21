@@ -1,5 +1,5 @@
 use accumulator::{
-    accumulator::{Accumulator, Element}, key::{PublicKey, SecretKey}, proof::ProofParamsPublic, window_mul, witness::{MembershipWitness, UpdatePolynomials}, Coefficient, UpMsg
+    accumulator::{Accumulator, Element}, key::{PublicKey, SecretKey}, proof::ProofParamsPublic, window_mul, witness::{MembershipWitness, UpdatePolynomials}, UpMsg
 };
 
 use blsful::inner_types::{G1Projective, Scalar};
@@ -18,7 +18,7 @@ pub struct RevocationHandle {
 impl RevocationHandle {
     /// Creates a new RevocationHandle an accumulator value and the corrisponding secret key
     fn new(accumulator: Accumulator, secret_key: &SecretKey) -> Self {
-        // Pick a random y
+        //ff Pick a random y
         let elem = Element::random();
         // Create a witness for y
         let wit = MembershipWitness::new(&elem, accumulator, secret_key);
@@ -43,8 +43,8 @@ impl RevocationHandle {
     /// use entities::Issuer;
     ///
     /// let mut issuer = Issuer::new(None);
-    /// let mut rh1: RevocationHandle = issuer.add("holder_1").expect("Failed to add");
-    /// issuer.add("holder_2");
+    /// let mut rh1: RevocationHandle = issuer.add("holder_1").unwrap();
+    /// issuer.add("holder_2").unwrap();
     ///
     /// let update_poly = issuer.revoke("holder_2").unwrap();  
     /// assert!(!rh1.verify(issuer.get_pk(), issuer.get_accumulator()));     
@@ -57,11 +57,11 @@ impl RevocationHandle {
         &mut self,
         update_polys: &[UpdatePolynomials],
     ) -> Result<MembershipWitness, accumulator::Error> {
-        let (deletions, omegas): (Vec<&[Element]>, Vec<&[Coefficient]>) = update_polys
+        let (deletions, omegas): (Vec<&[Element]>, Vec<&accumulator::utils::PolynomialG1>) = update_polys
             .iter()
-            .map(|poly| (poly.deletions.as_slice(), poly.omegas.as_slice()))
+            .map(|poly| (poly.deletions.as_slice(), &poly.omegas))
             .unzip();
-        self.wit.update_assign(self.elem, deletions.as_slice(), omegas.as_slice())
+        self.wit.update_assign(self.elem, &deletions, &omegas)
     }
 
     /// Sequentially updates `self.wit` executing the single update algorithm over the input instances of `UpMsg`.
@@ -96,7 +96,7 @@ impl RevocationHandle {
     /// let mut issuer = Issuer::new(None);
     ///
     /// // Add "holder_1" producing a RevocationHandle instance
-    /// let mut rh1: RevocationHandle = issuer.add("holder_1").expect("Failed to add");
+    /// let mut rh1: RevocationHandle = issuer.add("holder_1").unwrap();
     ///
     /// // Check validity of `self.wit` with respect to public values
     /// assert!(rh1.verify(issuer.get_pk(), issuer.get_accumulator()));     
@@ -106,7 +106,7 @@ impl RevocationHandle {
     }
 
     /// Updates the witness with the input point
-    pub fn update_witness(&mut self, new_wit: G1Projective) {
+    pub fn apply_update(&mut self, new_wit: G1Projective) {
         self.wit.apply_update(new_wit);
     }
 }
@@ -155,7 +155,7 @@ impl Issuer {
     /// * `pseudo` - A unique pseudonym associated to the new holder.  
     ///
     /// # Returns
-    /// * `Some(`RevocationHandle`)` if the addition is succesful.
+    /// * `Some(RevocationHandle)` if the addition is succesful.
     /// * `None` if the additon fails (e.g., the pseudonym is not unique).
     ///
     /// # Examples
@@ -187,7 +187,7 @@ impl Issuer {
     /// * `pseudo`: pseudonyms of holder to be revoked
     ///
     /// # Returns
-    /// * `Some(`UpdatePolynomials`)` if the holder is succesfully revoked.
+    /// * `Some(UpdatePolynomials)` if the holder is succesfully revoked.
     /// * `None` the holder could not be revoked (e.g., he was already revoked).
     ///
     /// ```
@@ -212,7 +212,7 @@ impl Issuer {
     pub fn revoke<T: AsRef<str>>(&mut self, pseudo: T) -> Option<UpdatePolynomials> {
         match self.witnesses.remove(pseudo.as_ref()) {
             Some(rh) => Some(UpdatePolynomials {
-                omegas: vec![self.acc.remove_assign(&self.acc_sk, rh.elem).into()],
+                omegas: vec![self.acc.remove_assign(&self.acc_sk, rh.elem).0].into(),
                 deletions: vec![rh.elem],
             }),
             None => None,
@@ -225,7 +225,7 @@ impl Issuer {
     /// * `pseudos` - The pseudonyms of the holders to be revoked.  
     ///
     /// # Returns
-    /// * `Some(`UpdatePolynomial`)` if some holders were succesfully revoked.
+    /// * `Some(UpdatePolynomial)` if some holders were succesfully revoked.
     /// * `None` if no holder could be revoked (e.g., all holders were already revoked).
     ///
     /// # Note:
@@ -262,7 +262,7 @@ impl Issuer {
         }
 
         // Otherwise revoke all valid pseudonyms, updating accumulator and computing update poly
-        let omegas = self.acc.update_assign(&self.acc_sk, deletions.as_slice());
+        let omegas = self.acc.update_assign(&self.acc_sk, deletions.as_slice()).into();
         Some(UpdatePolynomials { deletions, omegas })
     }
 
@@ -272,7 +272,7 @@ impl Issuer {
     /// * `pseudos`: pseudonyms of holders to be revoked
     ///
     /// # Returns
-    /// * `Some(`Vec<UpMsg>`)` if some holders were succesfully revoked.
+    /// * `Some(Vec<UpMsg>)` if some holders were succesfully revoked.
     /// * `None` no holder could be revoked (e.g., all holders were already revoked).
     ///
     /// # Examples:
@@ -287,8 +287,8 @@ impl Issuer {
     /// let up_msgs = issuer.revoke_seq(&["holder_2", "holder_3"]).unwrap();
     ///
     /// // Revocation is enforced
-    /// assert!(!rh_1.verify(issuer.get_pk(), issuer.get_accumulator()));
     /// assert!(!rh_2.verify(issuer.get_pk(), issuer.get_accumulator()));
+    /// assert!(!rh_1.verify(issuer.get_pk(), issuer.get_accumulator()));
     /// assert!(!rh_3.verify(issuer.get_pk(), issuer.get_accumulator()));
     ///
     /// // Second revocation of the same user fails
@@ -398,7 +398,9 @@ impl Issuer {
         //Compute update polys
         let omegas = self
             .acc
-            .update_assign(&self.acc_sk, self.revocation_list.as_slice());
+            .update_assign(&self.acc_sk, self.revocation_list.as_slice())
+            .into();
+
         let polys = UpdatePolynomials {
             deletions: self.revocation_list.clone(),
             omegas,
@@ -435,8 +437,8 @@ impl Issuer {
     /// let witnesses = issuer.get_witnesses();
     ///
     /// // Updated witnesses are computed for revoked holders
-    /// rh_1.update_witness(witnesses["holder_1"].0);
-    /// rh_2.update_witness(witnesses["holder_2"].0);
+    /// rh_1.apply_update(witnesses["holder_1"].0);
+    /// rh_2.apply_update(witnesses["holder_2"].0);
     /// assert!(rh_1.verify(issuer.get_pk(), issuer.get_accumulator()));
     /// assert!(rh_2.verify(issuer.get_pk(), issuer.get_accumulator()));
     ///
@@ -462,7 +464,7 @@ impl Issuer {
         self.witnesses
             .iter_mut()
             .enumerate()
-            .for_each(|(i, (_, rh))| rh.update_witness(new_wits[i]));
+            .for_each(|(i, (_, rh))| rh.apply_update(new_wits[i]));
     }
 
     /// Get the current accumulator value.
@@ -790,7 +792,7 @@ mod tests {
             let wit = new_wits
                 .get(&i.to_string())
                 .expect("Non-revoked element is not present in witness list!");
-            rhs[i].update_witness(wit.0);
+            rhs[i].apply_update(wit.0);
             assert!(rhs[i].verify(issuer.get_pk(), issuer.get_accumulator()))
         });
 
