@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdatePolynomials {
     pub deletions: Vec<Element>,
-    pub omegas: Vec<Coefficient>,
+    pub omegas: PolynomialG1,
 }
 
 // Groups the deleted element and new accumulator value
@@ -44,7 +44,7 @@ impl Into<UpdatePolynomials> for UpMsg {
     fn into(self) -> UpdatePolynomials {
         UpdatePolynomials {
             deletions: vec![self.get_element()],
-            omegas: vec![self.get_coefficient()],
+            omegas: vec![self.get_coefficient().0].into(),
         }
     }
 }
@@ -135,11 +135,11 @@ impl MembershipWitness {
     /// and list of deleted elements `deletions`.
     ///
     /// Returns a new updated instance of `MembershipWitness` or `Error`.
-    pub fn batch_update(
+    pub fn batch_update <T: AsRef<Scalar>>(
         &self,
         e: Element,
-        deletions: &[Element],
-        omega: &[Coefficient],
+        deletions: &[T],
+        omega: &PolynomialG1,
     ) -> Result<MembershipWitness, Error> {
         return self.clone().batch_update_assign(e, deletions, omega);
     }
@@ -149,34 +149,30 @@ impl MembershipWitness {
     /// and list of deleted elements `deletions`.
     ///
     /// Returns a new updated instance of `MembershipWitness` or `Error`
-    pub fn batch_update_assign(
+    pub fn batch_update_assign<T: AsRef<Scalar>>(
         &mut self,
         e: Element,
-        deletions: &[Element],
-        omega: &[Coefficient],
+        deletions: &[T],
+        omega: &PolynomialG1,
     ) -> Result<MembershipWitness, Error> {
         // d(e) = ∏ 1..m (e_i - e)
-        let mut d_e = dd_eval(&vec![deletions], e.0);
+        let mut d_e = dd_eval(deletions, e.0);
 
         let t = d_e.invert();
 
         // If this fails, then this value was removed
         if bool::from(t.is_none()) {
-            return Err(Error::from_msg(1, "no inverse exists"));
+            return Err(Error::from_msg(1, "No inverse exists"));
         }
         d_e = t.unwrap();
 
-        // Build polynomial from coefficient list
-        let poly: PolynomialG1 = omega.into();
-
         // Compute Ω(e) using Pippenger's approach for Multi Scalar Multiplication
-        if let Some(v) = poly.msm(&e.0) {
+        if let Some(v) = omega.msm(&e.0) {
             // A_{t+1} = 1/d(e) * (A - Ω(e))
-            self.0 -= v;
-            self.0 *= d_e;
+            self.0 = (self.0-v) * d_e;
             Ok(*self)
         } else {
-            Err(Error::from_msg(2, "polynomial could not be evaluated"))
+            Err(Error::from_msg(2, "Polynomial could not be evaluated"))
         }
     }
 
@@ -185,11 +181,11 @@ impl MembershipWitness {
     /// and list of deleted elements `deletions`.
     ///
     /// Returns a new updated instance of `MembershipWitness` or `Error`
-    pub fn update(
+    pub fn update<T: AsRef<Scalar>>(
         &mut self,
         e: Element,
-        deletions: &[&[Element]],
-        omegas: &[&[Coefficient]],
+        deletions: &[&[T]],
+        omegas: &[&PolynomialG1],
     ) -> Result<MembershipWitness, Error> {
         return self.clone().update_assign(e, deletions, omegas);
     }
@@ -199,36 +195,29 @@ impl MembershipWitness {
     /// and list of deleted elements `deletions`.
     ///
     /// Returns a new updated instance of `MembershipWitness` or `Error`
-    pub fn update_assign(
+    pub fn update_assign<T: AsRef<Scalar>>(
         &mut self,
         e: Element,
-        deletions: &[&[Element]],
-        omegas: &[&[Coefficient]],
+        deletions: &[&[T]],
+        omegas: &[&PolynomialG1],
     ) -> Result<MembershipWitness, Error> {
-        // Build update polynomials using omega coefficients
-        let coeff = omegas
-            .into_iter()
-            .map(|&omega| {
-                omega.into()            
-            })
-            .collect::<Vec<PolynomialG1>>();
 
         // Compute evaluations a_{t+1},...,a_{t+n} as in page 39 of my thesis
         let scalars = dd_evals(deletions, e.0);
 
         // d_{t -> t+n}(e) = ∏^{t+m}_{i=t+1} d_i(e) = d_{t+1}(e) * a_{t+n}
         let mut d_d: Scalar =
-            scalars.last().unwrap() * dd_eval(&[deletions.last().unwrap()], e.0);
+            scalars.last().unwrap() * dd_eval(deletions.last().unwrap(), e.0);
         let t = d_d.invert();
 
         // If this fails, then 'e' was removed
         if bool::from(t.is_none()) {
-            return Err(Error::from_msg(1, "no inverse exists"));
+            return Err(Error::from_msg(1, "No inverse exists"));
         }
         d_d = t.unwrap();
 
         // Compute aggragated evaluation Ω_{t->t+n}(e) using Multi Scalar Multiplication
-        if let Some(v) = aggregate_eval_omega(coeff, &scalars, e.0) {
+        if let Some(v) = aggregate_eval_omega(omegas, &scalars, e.0) {
             // A_{t+n} = 1 / d_{t->t+n}(e) * (A_t - Ω_{t->t+n}(e))
             self.0 -= v;
             self.0 *= d_d;
@@ -272,65 +261,28 @@ impl MembershipWitness {
         res.copy_from_slice(self.0.to_bytes().as_ref());
         res
     }
-
-    /// Old unoptimized version from ALLOSAUR implementation, just for testing
-    fn _batch_update_assign(
-        &mut self,
-        y: Element,
-        deletions: &[Element],
-        coefficients: &[Coefficient],
-    ) -> Result<MembershipWitness, Error> {
-        // dD(x) = ∏ 1..m (yD_i - x)
-        let mut d_d = dd_eval(&vec![deletions], y.0);
-
-        
-        // If inversion fails, then y was removed
-        let t = d_d.invert();
-        if bool::from(t.is_none()) {
-            return Err(Error::from_msg(1, "no inverse exists"));
-        }
-        d_d = t.unwrap();
-
-        let poly: PolynomialG1 = coefficients.into();
-
-        // Compute〈Υy,Ω〉using direct evaluation
-        if let Some(v) = poly.evaluate(&y.0) {
-            // C' = 1 / dD * (C -〈Υy,Ω))
-            self.0 -= v;
-            self.0 *= d_d;
-            Ok(*self)
-        } else {
-            Err(Error::from_msg(2, "polynomial could not be evaluated"))
-        }
-    }
 }
 
 /// Evaluates poly d(e) = ∏ 1..m (e_i - e)
-fn dd_eval(values: &[&[Element]], e: Scalar) -> Scalar {
-    values
+fn dd_eval<T: AsRef<Scalar>>(deletions: &[T], e: Scalar) -> Scalar {
+    deletions
         .iter()
-        .map(|value| {
-            value
-                .iter()
-                .map(|e_i| e_i.0 - e)
-                .fold(Scalar::ONE, |s_i, e| s_i * e)
-        })
-        .product()
+        .map(|e_i| e_i.as_ref() - e)
+        .fold(Scalar::ONE, |s_i, e| s_i * e)
 }
 
 /// Creates list of evaluations for aggregating multiple update polynomials.
 ///
 /// Uses the list of batch deletions `batch_dels`, and the element `e`
 /// to compute the list of evaluatations `a_{t+1},...,a_{t+n}` as by page 39 of my thesis.
-fn dd_evals(batch_dels: &[&[Element]], e: Scalar) -> Vec<Scalar> {
-    let mut res = Vec::with_capacity(batch_dels.len());
-
+fn dd_evals<T: AsRef<Scalar>>(batch_dels: &[&[T]], e: Scalar) -> Vec<Scalar> {
     //`[1, d_{t+2}(e), d_{t+2}(e)*d_{t+3}(e),...,∏^{t+n}_{i=t+2} d_i(e)]`
+    let mut res = Vec::with_capacity(batch_dels.len());
     res.push(Scalar::ONE);
-    batch_dels[0..batch_dels.len() - 1]
+    batch_dels[..batch_dels.len() - 1]
         .iter()
-        .for_each(|&value| {
-            res.push(res.last().unwrap() * dd_eval(&vec![value], e));
+        .for_each(|value| {
+            res.push(res.last().unwrap() * dd_eval(value, e));
         });
     res
 }
@@ -339,8 +291,11 @@ fn dd_evals(batch_dels: &[&[Element]], e: Scalar) -> Vec<Scalar> {
 mod tests {
     use super::*;
     use crate::key;
+    use crate::println_green;
+    use crate::println_red;
     use std::time::Duration;
     use std::time::Instant;
+    use agora_allosaurus_rs::accumulator as ago_acc;
 
     fn init(upd_size: usize) -> (key::SecretKey, key::PublicKey, Accumulator, Vec<Element>) {
         let key = SecretKey::new(Some(b"1234567890"));
@@ -385,7 +340,7 @@ mod tests {
         assert!(wit.verify(elem, pubkey, acc));
         assert!(!wit.verify(elem_d, pubkey, acc));
 
-        println!(
+        println_red!(
             "Sequential update of {} deletions: {:?}",
             deletions.len(),
             t
@@ -398,6 +353,7 @@ mod tests {
         // Non revoked (y, wit) pair
         let y = elements[0];
         let mut wit = MembershipWitness::new(&y, acc, &key);
+        let mut ago_wit = ago_acc::MembershipWitness(wit.0);
 
         // Revoked (y_d, wit_d) pair
         let y_d = elements[1];
@@ -405,34 +361,41 @@ mod tests {
 
         // Revoke y_1, ..., y_(upd_size-1) and compute coefficients for batch update
         let deletions = &elements[1..];
-        let coefficients = acc.update_assign(&key, deletions);
-
-        // Update non-revoked element with both versions
-        let mut wit2 = wit.clone();
-        let t1 = Instant::now();
+        let coefficients: PolynomialG1 = acc.update_assign(&key, deletions).into(); 
+        // Update non-revoked element 
+        let t1 = Instant::now();        
         wit.batch_update_assign(y, deletions, &coefficients)
             .expect("Error when evaluating poly");
         let t1 = t1.elapsed();
+
+        // Check updated witness verify
+        assert!(wit.verify(y, pubkey, acc));
+        
+        // Compare update with agora implementation
+        let ago_dels: Vec<_> = deletions.iter().map(|del| ago_acc::Element(del.0)).collect();
+        let ago_coeff: Vec<_> = coefficients.iter().map(|&c| ago_acc::Coefficient(-c)).collect();
+        let ago_y = ago_acc::Element(y.0);        
         let t2 = Instant::now();
-        wit2._batch_update_assign(y, deletions, &coefficients)
-            .expect("Error when evaluating poly");
+        ago_wit.batch_update_assign(ago_y, &[], &ago_dels, &ago_coeff);
         let t2 = t2.elapsed();
+        // Check update is the same
+        assert_eq!(ago_wit.0, wit.0);
+
 
         // Try updating revoked element
         assert!(wit_d
             .batch_update_assign(y_d, deletions, &coefficients)
             .is_err());
-
-        // Check (non)revocation of updated witness
+        // Check revoked witness is not updated
         assert!(!wit_d.verify(y_d, pubkey, acc));
-        assert!(wit.verify(y, pubkey, acc));
+        
 
-        println!(
-            "Batch update of {} deletions without MSM: {:?}",
+        println_red!(
+            "Agora Implementation: Batch update of {} deletions without MSM: {:?}",
             deletions.len(),
             t2
         );
-        println!(
+        println_green!(
             "Batch update of {} deletions with MSM: {:?}",
             deletions.len(),
             t1
@@ -450,19 +413,22 @@ mod tests {
         let deletions: Vec<&[Element]> = elements[1..].chunks(batch_size).collect();
 
         // Compute update coefficients
-        let mut coefficients = Vec::new();
+        let mut coefficients: Vec<PolynomialG1> = Vec::new();
         for i in 0..number_upds {
-            coefficients.push(acc.update_assign(&key, &deletions[i]));
+            coefficients.push(
+                acc.update_assign(&key, &deletions[i]).into()
+            );
         }
 
+        let coefficients_ref: Vec<_> = coefficients.iter().collect();
+        
         // Update non-revoked element with both versions
         let mut wit2 = wit.clone();
-
         let t1 = Instant::now();
         wit.update_assign(
             e,
             &deletions,
-            &coefficients.iter().map(Vec::as_slice).collect::<Vec<&[Coefficient]>>().as_slice(),
+            &coefficients_ref,
         )
         .expect("Error when evaluating poly");
         let t1 = t1.elapsed();
@@ -470,17 +436,17 @@ mod tests {
         let mut t2 = Duration::from_micros(0);
         for i in 0..deletions.len() {
             let t = Instant::now();
-            wit2.batch_update_assign(e, deletions[i], coefficients[i].as_slice())
+            wit2.batch_update_assign(e, deletions[i], &coefficients[i])
                 .expect("Error when evaluating poly");
             t2 += t.elapsed();
         }
 
-        println!(
+        println_red!(
             "Batch update of {} deletions without aggregation: {:?}",
             deletions.len(),
             t2
         );
-        println!(
+        println_green!(
             "Batch update of {} deletions with aggregation: {:?}",
             deletions.len(),
             t1
