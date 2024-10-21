@@ -18,7 +18,7 @@ pub struct RevocationHandle {
 impl RevocationHandle {
     /// Creates a new RevocationHandle an accumulator value and the corrisponding secret key
     fn new(accumulator: Accumulator, secret_key: &SecretKey) -> Self {
-        //ff Pick a random y
+        // Pick a random y
         let elem = Element::random();
         // Create a witness for y
         let wit = MembershipWitness::new(&elem, accumulator, secret_key);
