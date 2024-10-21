@@ -51,8 +51,8 @@ impl Holder {
     }
 
     /// Replace the holder's witness with the input witness `new_mw`.
-    pub fn replace_witness(&mut self, new_mw: MembershipWitness) {
-        self.rh.update_witness(new_mw.0);
+    pub fn apply_update(&mut self, new_mw: MembershipWitness) {
+        self.rh.apply_update(new_mw.0);
     }
 
     /// Test membership of the holder's witness against the accumulator contained
