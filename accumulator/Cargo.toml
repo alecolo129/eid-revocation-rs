@@ -22,3 +22,8 @@ merlin = "3.0.0"
 bincode = "1.3.3"
 ark-ff = "0.4.2"
 blsful = "2.5.7"
+
+[dev-dependencies]
+agora-allosaurus-rs = { git = "https://github.com/hyperledger-labs/agora-allosaurus-rs" }
+criterion = "0.4"
+serde_bare = "0.5"
