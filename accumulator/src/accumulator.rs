@@ -59,9 +59,21 @@ impl From<Element> for Scalar{
     }
 }
 
+impl From<Scalar> for Element{
+    fn from(value: Scalar) -> Self {
+        Element(value)
+    }
+}
+
 impl Deref for Element{
     type Target = Scalar;
     fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<Scalar> for Element{
+    fn as_ref(&self) -> &Scalar {
         &self.0
     }
 }
@@ -190,13 +202,13 @@ impl Accumulator {
 
     /// Given the accumulator trapdoor `key` and a list of deletions `deletions`,
     /// returns the list of update coefficients for polynomial `Ω(X)` without updating the accumulator.
-    pub fn update(&self, key: &SecretKey, deletions: &[Element]) -> Vec<Coefficient> {
+    pub fn update(&self, key: &SecretKey, deletions: &[Element]) -> Vec<G1Projective> {
         self.clone().update_assign(key, deletions)
     }
 
     /// Given the accumulator trapdoor `key` and a list of deletions `deletions`,
     /// performs a batch update of the accumulator returning the list of update coefficients.
-    pub fn update_assign(&mut self, key: &SecretKey, deletions: &[Element]) -> Vec<Coefficient> {
+    pub fn update_assign(&mut self, key: &SecretKey, deletions: &[Element]) -> Vec<G1Projective> {
         // See page 34 of my thesis (eq. 4.4, 4.7)
 
         // d = ((x+e_1)*...*(x+e_m))^-1
@@ -210,7 +222,7 @@ impl Accumulator {
         // V_{t+1} = V_t*d
         self.0 *= d.0;
 
-        coefficients.into_iter().map(|c| Coefficient(c)).collect()
+        coefficients
     }
 
     /// Generate accumulator id
@@ -225,18 +237,6 @@ impl Accumulator {
         d
     }
 
-    /// Performs a batch deletion as described on page 11, section 5 in
-    /// https://eprint.iacr.org/2020/777.pdf. Unoptimized version, maintained only for testing
-    fn _update_assign(&mut self, key: &SecretKey, deletions: &[Element]) -> Vec<Coefficient> {
-        let d = key.batch_deletions(deletions);
-        let coefficients = key
-            .gen_up_poly(deletions)
-            .iter()
-            .map(|c| Coefficient(self.0 * c.0))
-            .collect();
-        self.0 *= d.0;
-        coefficients
-    }
 }
 
 impl fmt::Display for Accumulator {
@@ -284,7 +284,7 @@ mod tests {
     use crate::{MembershipWitness, PublicKey};
     use group::ff::Field;
     use std::time::Instant;
-
+    use agora_allosaurus_rs::accumulator as ago_acc;
     use super::*;
 
     // Single removal
@@ -349,12 +349,12 @@ mod tests {
     #[test]
     fn acc_batch_update_test() {
         const CREDENTIAL_SPACE: usize = 1_010;
-        const BATCH_DELETIONS: usize = 1_000;
+        const BATCH_DELETIONS: usize = 1000;
 
         // Generate params
         let key = SecretKey::new(Some(b"Key{i}"));
         let mut a = Accumulator::random(rand_core::OsRng {});
-        let mut a2 = a.clone();
+        let mut acc_ago = ago_acc::Accumulator(a.0);
 
         // Create users
         let mut users = Vec::with_capacity(CREDENTIAL_SPACE);
@@ -368,15 +368,17 @@ mod tests {
         let t1 = Instant::now();
         let coeff = a.update_assign(&key, revoked);
         let t1 = t1.elapsed();
-
+        
+        let key_ago = ago_acc::SecretKey::try_from(&key.to_bytes()).unwrap(); 
+        let dels_ago: Vec<_> = revoked.iter().map(|el| ago_acc::Element(el.0)).collect();
         let t2 = Instant::now();
-        let coeff2 = a2._update_assign(&key, revoked);
+        let coeff2: Vec<_> = acc_ago.update_assign(&key_ago, &[],&dels_ago).into_iter().map(|coeff| -coeff.0).collect();
         let t2 = t2.elapsed();
 
         assert_eq!(coeff, coeff2);
 
         println!(
-            "Time to compute update poly omega for {BATCH_DELETIONS} deletions: {:?}",
+            "Agora Implementation: Time to compute update poly omega for {BATCH_DELETIONS} deletions: {:?}",
             t2
         );
         println!("Time to compute updates poly omega for {BATCH_DELETIONS} deletions with windowed multiplication: {:?}", t1);
