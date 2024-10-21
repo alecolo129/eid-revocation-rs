@@ -12,4 +12,3 @@ pub use key::*;
 pub use proof::*;
 pub use utils::*;
 pub use witness::*;
-pub use macros::*;
