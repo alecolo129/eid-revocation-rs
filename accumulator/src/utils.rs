@@ -2,8 +2,9 @@ use blsful::inner_types::*;
 use digest::{ExtendableOutput, Update, XofReader};
 use group::ff::{Field, PrimeField};
 use rand_core::{CryptoRng, RngCore};
+use serde::{Deserialize, Serialize};
 use sha3::Shake256;
-use std::{ops::Deref, usize};
+use std::{borrow::Borrow, ops::Deref, usize};
 
 use crate::Coefficient;
 
@@ -43,13 +44,27 @@ pub fn hash_to_g1<I: AsRef<[u8]>>(data: I) -> G1Projective {
 pub const SALT: &[u8] = b"KB-VB-ACC-HASH-SALT-";
 
 /// A Polynomial for Points
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct PolynomialG1(pub Vec<G1Projective>);
 
 impl Deref for PolynomialG1{
     type Target = Vec<G1Projective>;
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl From<Vec<G1Projective>> for PolynomialG1{
+    fn from(value: Vec<G1Projective>) -> Self {
+        Self(
+            value
+        )
+    }
+}
+
+impl Into<Vec<G1Projective>> for PolynomialG1{
+    fn into(self) -> Vec<G1Projective> {
+        self.0
     }
 }
 
@@ -290,7 +305,7 @@ fn to_naf(scalars: &[Scalar], c: u32) -> Vec<Vec<i128>> {
 
 /// Optimized implementation of multi-scalar multiplication adapted from ark-ec library.
 /// Given a list of coefficients `P_1,...,P_m` and scalars `c_1,...,c_m`, compute ∑^{m}_{i=1} c_i * P_i
-pub fn msm(coeff: &[G1Projective], scalars: &[Scalar]) -> Option<G1Projective> {
+pub fn msm<T: Borrow<G1Projective>>(coeff: &[T], scalars: &[Scalar]) -> Option<G1Projective> {
     // If the polynomial is empty we return None
     if coeff.is_empty() || coeff.len() != scalars.len() {
         return None;
@@ -320,15 +335,15 @@ pub fn msm(coeff: &[G1Projective], scalars: &[Scalar]) -> Option<G1Projective> {
         .map(|(i, _)| {
             let mut res = zero;
 
-            scalars_and_coeff_iter.clone().for_each(|(scalar, &base)| {
+            scalars_and_coeff_iter.clone().for_each(|(scalar, base)| {
                 let index = scalar[i];
                 // If the scalar is non-zero, we update the corresponding
                 // bucket.
                 index.is_negative().then(|| {
-                    buckets[index.abs() as usize - 1] -= base;
+                    buckets[index.abs() as usize - 1] -= base.borrow();
                 });
                 index.is_positive().then(|| {
-                    buckets[index.abs() as usize - 1] += base;
+                    buckets[index.abs() as usize - 1] += base.borrow();
                 });
             });
 
@@ -366,7 +381,7 @@ pub fn msm(coeff: &[G1Projective], scalars: &[Scalar]) -> Option<G1Projective> {
 }
 
 /// A Polynomial for scalars
-#[derive(Default, Clone)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Polynomial(pub Vec<Scalar>);
 
 impl Polynomial {
@@ -406,9 +421,25 @@ impl Polynomial {
     }
 }
 
+impl Deref for Polynomial{
+    type Target = Vec<Scalar>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl From<Vec<Scalar>> for Polynomial {
     fn from(scalars: Vec<Scalar>) -> Self {
         Self(scalars)
+    }
+}
+
+impl IntoIterator for Polynomial{
+    type Item = Scalar;
+    type IntoIter = std::vec::IntoIter<Scalar>;
+    fn into_iter(self) -> Self::IntoIter {        
+        self.0.into_iter()
     }
 }
 
@@ -496,7 +527,7 @@ impl core::ops::MulAssign<Scalar> for Polynomial {
     }
 }
 
-fn aggregate_d(omegas: &[PolynomialG1], scalars: &[Scalar], e: Scalar) -> Vec<Scalar> {
+fn aggregate_d(omegas: &[&PolynomialG1], scalars: &[Scalar], e: Scalar) -> Vec<Scalar> {
     let max_deg = omegas
         .iter()
         .max_by(|x, y| x.degree().cmp(&y.degree()))
@@ -521,18 +552,22 @@ fn aggregate_d(omegas: &[PolynomialG1], scalars: &[Scalar], e: Scalar) -> Vec<Sc
 }
 
 pub fn aggregate_eval_omega(
-    omegas: Vec<PolynomialG1>,
+    omegas: &[&PolynomialG1],
     scalars: &[Scalar],
     e: Scalar,
 ) -> Option<G1Projective> {
+    
+    // Check vectors are non empty and consistent
     if omegas.len() == 0 || omegas.len() != scalars.len() {
         return None;
     }
+
+
     let max_deg = omegas
         .iter()
-        .max_by(|x, y| x.degree().cmp(&y.degree()))
-        .unwrap()
-        .degree();
+        .map(|p| p.degree())
+        .max()
+        .expect("Input omegas vector is empty: this should not happen!");
 
     // Pre-compute all required powers of the input element
     let mut powers = Vec::<Scalar>::with_capacity(max_deg);
@@ -544,8 +579,8 @@ pub fn aggregate_eval_omega(
     // Scalar vector
     let scalars = aggregate_d(&omegas, scalars, e);
 
-    //Point Vector
-    let omega: Vec<G1Projective> = omegas.into_iter().map(|p| p.0).flatten().collect();
+    // Point Vector
+    let omega: Vec<&G1Projective> = omegas.iter().flat_map(|&omega| &omega.0).collect();
     msm(&omega, &scalars)
 }
 
