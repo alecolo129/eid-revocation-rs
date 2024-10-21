@@ -1,4 +1,4 @@
-use accumulator::{Accumulator, Coefficient, Element, MembershipWitness, PublicKey, SecretKey, UpMsg};
+use accumulator::{Accumulator, Element, MembershipWitness, PolynomialG1, PublicKey, SecretKey, UpMsg};
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::vec::Vec;
 
@@ -131,7 +131,7 @@ fn batch_update(c: &mut Criterion) {
                 acc.update(&key, deletions.as_slice())
             })
         });*/
-        let coefficients = acc.update_assign(&key, deletions.as_slice());
+        let coefficients: PolynomialG1 = acc.update_assign(&key, deletions.as_slice()).into();
 
         // Benchmarks user response
         c.bench_function("Batch update user-side update", |b| {
@@ -183,10 +183,12 @@ fn batch_update_aggr(c: &mut Criterion) {
 
         // Creates update polynomials
         println!("Starting to generate up poly:");
-        let coefficients: Vec<Vec<accumulator::Coefficient>> = deletions
+        let coefficients: Vec<_> = deletions
             .iter()
-            .map(|del| acc.update_assign(&key, &del))
+            .map(|del| acc.update_assign(&key, &del).into())
             .collect();
+
+        let coefficients_ref: Vec<_> = coefficients.iter().collect();
         println!("Upd poly finished");
 
         // Batch update no aggregation
@@ -205,7 +207,7 @@ fn batch_update_aggr(c: &mut Criterion) {
                     .update(
                         e,
                         &deletions,
-                        &coefficients.iter().map(|c| c.as_slice()).collect::<Vec<&[Coefficient]>>().as_slice(),
+                        &coefficients_ref,
                     )
                     .unwrap();
             })
@@ -215,7 +217,7 @@ fn batch_update_aggr(c: &mut Criterion) {
             .update_assign(
                 e,
                 &deletions,
-                &coefficients.iter().map(|c| c.as_slice()).collect::<Vec<&[Coefficient]>>().as_slice()
+                &coefficients_ref
             )
             .unwrap()
             .verify(e, PublicKey::from(&key), acc));
