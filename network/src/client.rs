@@ -107,7 +107,7 @@ impl Client {
                 let update: PeriodicUpdate = bincode::deserialize(&body)?;
 
                 // Update witness and accumulator
-                hol.replace_witness(update.1);
+                hol.apply_update(update.1);
                 hol.update_accumulator(update.0);
 
                 return Ok(true);
