@@ -37,3 +37,6 @@ For the optimized release mode execute:
 
 and the results will be output to the terminal. File names *should not* include the `.rs` extension.
 
+## Licence
+This crate is published under the MIT licence and it is based on the single-server implementation of [allosaurust](https://github.com/sam-jaques/allosaurust) which is published under the same licence.
+The files `src/witness.rs` and `src/utils.rs` have been modified to improve the update strategy, while the file `src/proof.rs` optimizes the zk-proof generation.
