@@ -2,7 +2,8 @@
 
 This repository contains the implementation of an accumulator-based revocation scheme for electronic identities in the type described in Scenario B of the [Swiss eID Community](https://github.com/e-id-admin/open-source-community/blob/main/discussion-paper-tech-proposal/discussion-paper-tech-proposal.md).
 
-**Warning**: the code in this repository is provided as a proof of concept for scalability evaluation. It is not recommended for production use.
+## Security Notes 
+The code in this repository is provided as a proof of concept for scalability evaluation. This crate has received no security audit, use it at your own risk.
 
 ## Structure of the Repository
 This repository contains the following packages:
@@ -36,5 +37,5 @@ In this experiment we fix a total of 5000 deletions, which we split into multipl
 
 As we highlight in page 42, this *eliminates* the need of computing update polynomials.
 
-## Credits
-The *accumulator* package is based on top of the ALLOSAUR [single-server implementation](https://github.com/sam-jaques/allosaurust), developed by Mike Lodder and Sam Jaques. 
+## License
+This software is licensed under the MIT license. The `accumulator` package is based on the single-server implementation of [allosaurust](https://github.com/sam-jaques/allosaurust) which is published under the same licence. The main differences lie in the optimized zk-proof computation (`accumulator/src/proof.rs`), and the more efficient batching and evaluation of update polynomails (`accumulator/src/utils.rs`, `accumulator/src/witness.rs`). 
